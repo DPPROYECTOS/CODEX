@@ -1,0 +1,5 @@
+{
+  "name": "CODEX Consultation Platform",
+  "description": "Official procedure consultation platform with strict area-based access control, privacy enforcement, and synchronization with master data.",
+  "requestFramePermissions": []
+}
