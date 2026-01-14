@@ -22,27 +22,29 @@ export enum Status {
 }
 
 export interface Folder {
-  id: string; // Cambiado a string para soportar UUID de Supabase
+  id: string; 
   name: string;
-  parent_id: string | null; // Cambiado a string para soportar UUID
+  parent_id: string | null; 
   created_at: string;
-  area?: string; // Campo opcional para filtrado por área
+  area?: string; 
 }
 
 export interface User {
   $id: string;
   name: string;
   email: string;
-  area: string; // Área principal (para etiqueta visual)
-  allowedAreas: string[]; // MATRIZ DE ACCESO: Lista de todas las áreas permitidas
+  area: string; 
+  allowedAreas: string[]; 
   role: string;
   avatarUrl?: string;
   privacyAccepted?: boolean;
-  signedName?: string;       // Nombre específico usado al firmar
-  signedDepartment?: string; // Departamento específico usado al firmar
-  lastIp?: string;           // IP desde donde inició sesión
-  maxDevices?: number;       // Límite de IPs autorizadas
-  isImpersonating?: boolean; // MODO AUDITOR: Indica si es un admin logueado como usuario
+  signedName?: string;       
+  signedDepartment?: string; 
+  lastIp?: string;           
+  lastDeviceId?: string;     
+  authorizedDevices?: string[]; // Array para guardar todos los IDs vinculados
+  maxDevices?: number;       
+  isImpersonating?: boolean; 
 }
 
 export interface OnlineUser {
@@ -51,14 +53,15 @@ export interface OnlineUser {
   email: string;
   area: string;
   role: string;
-  onlineAt: string; // ISO String de cuándo se conectó esta sesión
+  onlineAt: string; 
+  ip: string; 
 }
 
 export interface Department {
   id: number;
   name: string;
   max_users: number;
-  current_count?: number; // Para uso interno del frontend
+  current_count?: number; 
 }
 
 export interface ProcedureHistory {
@@ -72,14 +75,14 @@ export interface Procedure {
   $id: string;
   name: string;
   code: string;
-  area: Area | string; // Permitir string para compatibilidad con DB
+  area: Area | string; 
   version: string;
   status: Status;
   description: string;
   attachmentUrl?: string; 
   format?: string;        
   urlVideo?: string;
-  folder_id?: string; // Cambiado a string (UUID)
+  folder_id?: string; 
   updatedAt: string;
   responsible: string;
   history: ProcedureHistory[];
@@ -98,27 +101,26 @@ export interface ConsultationReply {
   message: string;
   created_at: string;
   user_name?: string;
-  user_role?: string; // Para distinguir si es Admin o Usuario en la UI
-  user_avatar?: string; // Avatar URL
+  user_role?: string; 
+  user_avatar?: string; 
 }
 
 export interface ConsultationMessage {
   id: string;
   user_id: string;
-  title?: string; // Título o Asunto del Ticket
+  title?: string; 
   procedure_id?: string;
   procedure_name?: string;
   message: string;
   status: 'pending' | 'reviewed' | 'archived' | 'closed';
-  area?: string; // IMPORTANTE: Define visibilidad colaborativa
+  area?: string; 
   created_at: string;
-  // Campos opcionales para join con usuarios
   user_name?: string;
   user_email?: string;
   user_area?: string;
   user_role?: string;
-  user_avatar?: string; // Avatar URL
-  replies?: ConsultationReply[]; // Hilo de conversación
+  user_avatar?: string; 
+  replies?: ConsultationReply[]; 
 }
 
 export interface DownloadRequest {
@@ -129,9 +131,9 @@ export interface DownloadRequest {
   status: 'pending' | 'approved' | 'rejected' | 'consumed';
   requested_at: string;
   responded_at?: string;
-  user_name?: string; // Para UI Admin
-  user_email?: string; // Para UI Admin
-  user_area?: string; // Para UI Admin
+  user_name?: string; 
+  user_email?: string; 
+  user_area?: string; 
 }
 
 export interface AccessLog {
@@ -157,13 +159,11 @@ export interface ImprovementProposal {
   status: 'pending' | 'in_review' | 'approved' | 'rejected';
   admin_feedback?: string;
   created_at: string;
-  // Joins
   user_name?: string;
   user_email?: string;
   user_avatar?: string;
 }
 
-// Lista de correos con acceso al módulo de Administrador
 export const ADMIN_EMAILS = [
   'zerklucio@gmail.com',
   'darienperez695@gmail.com'

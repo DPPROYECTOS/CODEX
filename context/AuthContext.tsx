@@ -6,11 +6,12 @@ import { appwriteService } from '../services/appwriteService';
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  onlineUsers: OnlineUser[]; // Lista de usuarios conectados en tiempo real
+  onlineUsers: OnlineUser[]; 
   login: (email: string, password?: string) => Promise<void>;
   logout: () => void;
   acceptPrivacy: (signedName?: string, signedDepartment?: string) => Promise<void>;
-  updateUser: (updates: Partial<User>) => void; // Nueva función para actualizar estado local
+  updateUser: (updates: Partial<User>) => void;
+  forceLogoutUser: (userId: string) => Promise<void>; // Nueva función para admins
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,25 +21,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   
-  // Referencia para guardar el canal de suscripción y evitar duplicados
   const presenceChannel = useRef<any>(null);
 
   useEffect(() => {
     checkSession();
   }, []);
 
-  // Efecto para manejar la conexión de Realtime cuando el usuario cambia (Login/Logout)
   useEffect(() => {
-    // Si hay usuario logueado, iniciamos la conexión de presencia
     if (user) {
         if (!presenceChannel.current) {
             console.log("🟢 Iniciando transmisión de presencia...");
-            presenceChannel.current = appwriteService.subscribeToPresence(user, (users) => {
-                setOnlineUsers(users);
-            });
+            presenceChannel.current = appwriteService.subscribeToPresence(
+                user, 
+                (users) => {
+                    setOnlineUsers(users);
+                },
+                (targetId) => {
+                    // Este es el listener de broadcast para desconexión forzada
+                    if (targetId === user.$id) {
+                        console.warn("🛑 SESIÓN FINALIZADA POR ADMINISTRADOR (VÍA REALTIME)");
+                        logout();
+                        alert("Tu sesión ha sido finalizada por un administrador.");
+                    }
+                }
+            );
         }
     } else {
-        // Si no hay usuario, limpiamos la conexión
         if (presenceChannel.current) {
             console.log("🔴 Cerrando transmisión de presencia...");
             appwriteService.unsubscribeFromPresence(presenceChannel.current);
@@ -47,7 +55,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }
 
-    // Cleanup al desmontar el componente
     return () => {
         if (presenceChannel.current) {
             appwriteService.unsubscribeFromPresence(presenceChannel.current);
@@ -98,8 +105,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(prev => prev ? { ...prev, ...updates } : null);
   };
 
+  // Función para que el admin mande la señal de logout por el canal
+  const forceLogoutUser = async (targetUserId: string) => {
+    // 1. SI SOY YO MISMO: Logout local instantáneo (el WebSocket me ignoraría)
+    if (user && targetUserId === user.$id) {
+        console.warn("🛑 AUTO-DESCONEXIÓN EJECUTADA");
+        await logout();
+        return;
+    }
+
+    // 2. SI ES OTRO: Enviar broadcast por Realtime
+    if (presenceChannel.current) {
+        await presenceChannel.current.send({
+            type: 'broadcast',
+            event: 'force_logout',
+            payload: { userId: targetUserId }
+        });
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, onlineUsers, login, logout, acceptPrivacy, updateUser }}>
+    <AuthContext.Provider value={{ user, isLoading, onlineUsers, login, logout, acceptPrivacy, updateUser, forceLogoutUser }}>
       {children}
     </AuthContext.Provider>
   );

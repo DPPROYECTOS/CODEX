@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,6 +17,7 @@ import { AdminProposals } from './pages/AdminProposals';
 import { Privacy } from './pages/Privacy';
 import { Consultation } from './pages/Consultation';
 import { Proposals } from './pages/Proposals';
+import { Profile } from './pages/Profile';
 import { ScheduleLockScreen } from './components/ScheduleLockScreen';
 import { ADMIN_EMAILS } from './types';
 
@@ -24,7 +26,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const location = useLocation();
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50">Cargando aplicación...</div>;
+    return <div className="min-h-screen flex items-center justify-center bg-[#020617] text-indigo-500">Cargando aplicación...</div>;
   }
 
   if (!user) {
@@ -118,6 +120,7 @@ const AppRoutes: React.FC = () => {
                 <Route path="consultation" element={<Consultation />} />
                 <Route path="procedure/:id" element={<ProcedureDetail />} />
                 <Route path="proposals" element={<Proposals />} />
+                <Route path="profile" element={<Profile />} />
                 
                 {/* Rutas Admin Protegidas */}
                 <Route path="admin" element={

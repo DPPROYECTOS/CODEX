@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, Link } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -15,7 +15,8 @@ import {
   ChevronDown,
   FileCheck,
   TrendingUp,
-  Lightbulb 
+  Lightbulb,
+  User as UserIcon
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ADMIN_EMAILS } from '../types';
@@ -168,6 +169,7 @@ export const Layout: React.FC = () => {
                 location.pathname === '/catalog' ? 'Catálogo de Procedimientos' :
                 location.pathname === '/consultation' ? 'Consulta y Observaciones' :
                 location.pathname === '/proposals' ? 'Propuestas de Mejora' :
+                location.pathname === '/profile' ? 'Mi Perfil' :
                 location.pathname === '/admin' ? 'Administración' : 
                 location.pathname === '/admin/analytics' ? 'Analíticas de Uso' :
                 location.pathname === '/admin/requests' ? 'Solicitudes de Archivos' : 
@@ -208,6 +210,16 @@ export const Layout: React.FC = () => {
                           <p className="text-xs font-bold text-gray-500 uppercase">Cuenta Activa</p>
                           <p className="text-sm font-bold text-indigo-300 truncate">{user.email}</p>
                       </div>
+                      
+                      <Link 
+                        to="/profile" 
+                        onClick={() => setProfileMenuOpen(false)}
+                        className="w-full text-left px-4 py-3 text-sm font-bold text-gray-300 hover:bg-white/5 flex items-center transition-colors border-b border-white/5"
+                      >
+                          <UserIcon size={16} className="mr-2 text-indigo-400" />
+                          Mi Perfil
+                      </Link>
+
                       <button 
                         onClick={() => { logout(); setProfileMenuOpen(false); }}
                         className="w-full text-left px-4 py-3 text-sm font-bold text-red-400 hover:bg-white/5 flex items-center transition-colors"
