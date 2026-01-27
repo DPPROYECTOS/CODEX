@@ -86,7 +86,7 @@ export const Layout: React.FC = () => {
         <div className="p-6 border-b border-white/10">
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
             CODEX 
-            <span className="text-indigo-300 font-light text-sm bg-indigo-900/50 px-1.5 py-0.5 rounded border border-indigo-500/30">v1.0</span>
+            <span className="text-indigo-300 font-light text-sm bg-indigo-900/50 px-1.5 py-0.5 rounded border border-indigo-500/30">v1.5</span>
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-semibold">Plataforma Corporativa</p>
         </div>

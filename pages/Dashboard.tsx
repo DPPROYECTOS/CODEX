@@ -48,7 +48,7 @@ export const Dashboard: React.FC = () => {
   const isFullAdmin = isAdminByEmail || user.role === 'admin' || user.isImpersonating;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-700">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-700 relative">
       
       {/* SECCIÓN SUPERIOR: BÚSQUEDA */}
       <div className="relative group">
@@ -255,6 +255,11 @@ export const Dashboard: React.FC = () => {
                Cualquier intento de extracción, impresión no autorizada o compartición de credenciales será registrado y escalado al Departamento Legal.
            </p>
         </div>
+      </div>
+
+      {/* MARCA DE AGUA TÉCNICA DE VERSIÓN */}
+      <div className="flex justify-end pt-4 pb-2 opacity-20 pointer-events-none select-none">
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">System Build v1.5</span>
       </div>
     </div>
   );

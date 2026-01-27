@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { ArrowLeft, Save, ShieldAlert, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Heading1, Heading2, Undo, Redo, Eraser, Palette } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -225,7 +226,7 @@ La Constancia de Aceptación tiene carácter permanente y prueba que el Usuario 
         </div>
         
         <div className="bg-gray-50 p-2 border-t border-gray-200 text-xs text-gray-400 text-center uppercase tracking-wider font-semibold">
-             Editor WYSIWYG - CODEX System v1.0
+             Editor WYSIWYG - CODEX System v1.5
         </div>
       </div>
     </div>

@@ -140,6 +140,11 @@ export const Login: React.FC = () => {
           </button>
         </form>
       </div>
+
+      {/* MARCA DE AGUA DE VERSIÓN */}
+      <div className="absolute bottom-6 right-6 opacity-20 pointer-events-none select-none">
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Build v1.5</span>
+      </div>
     </div>
   );
 };
