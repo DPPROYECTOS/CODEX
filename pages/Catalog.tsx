@@ -1,8 +1,8 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { appwriteService, normalizeString } from '../services/appwriteService';
-import { Procedure, Folder } from '../types';
+import { Procedure, Folder, MASTER_VIEWER_EMAILS } from '../types';
 import { 
   Search, Folder as FolderIcon, ChevronRight, FileText, ArrowLeft, Grid, Plus, Edit2, Trash2, X, 
   AlertTriangle, CheckCircle, Clock, CornerUpLeft, ArrowUpRight, Box, Activity, ClipboardCheck, 
@@ -14,13 +14,10 @@ import { Link } from 'react-router-dom';
 import { FileViewerModal } from '../components/FileViewerModal';
 
 const AREA_ICONS: {[key: string]: any} = {
-  // Operaciones y Mejora
   "PROYECTOS Y MEJORA CONTINUA": Target,
   "PROYECTOS": Target,
   "CALIDAD": ShieldCheck,
   "OPERACIONES": Cog,
-  
-  // Logística y Almacén
   "MENSAJERIA Y DISTRIBUCION": Truck,
   "MENSAJERÍA Y DISTRIBUCIÓN": Truck,
   "ALMACEN C": Package,
@@ -33,15 +30,11 @@ const AREA_ICONS: {[key: string]: any} = {
   "LOGÍSTICA INVERSA": Repeat,
   "LOGISTICA INVERSA": Repeat,
   "WHATSAPP": Zap,
-
-  // Producción y Maquila
   "EMPAQUE RETAIL": ShoppingBag,
   "EMPAQUE TV": Monitor,
   "MAQUILA": Factory,
   "REACONDICIONADO": Hammer,
   "MANTENIMIENTO": Wrench,
-
-  // Administrativo y Seguridad
   "TECNOLOGÍAS DE LA INFORMACIÓN": Cpu,
   "TECNOLOGIAS DE LA INFORMACION": Cpu,
   "RECURSOS HUMANOS": Users,
@@ -86,7 +79,10 @@ export const Catalog: React.FC = () => {
   const [viewFile, setViewFile] = useState<{url: string, name: string} | null>(null);
 
   const isAdmin = user?.role === 'admin';
-  const isSingleAreaUser = !isAdmin && user?.allowedAreas.length === 1;
+  const isMasterViewer = user?.email && MASTER_VIEWER_EMAILS.includes(user.email.toLowerCase());
+  const hasGlobalVisibility = isAdmin || isMasterViewer;
+  
+  const isSingleAreaUser = !hasGlobalVisibility && user?.allowedAreas.length === 1;
 
   const showToast = (msg: string, type: 'success' | 'error') => {
       setToast({ msg, type });
@@ -107,7 +103,7 @@ export const Catalog: React.FC = () => {
   }, [isSingleAreaUser, selectedArea, user]);
 
   const displayAreas = availableAreas.filter(area => {
-      if (isAdmin) return true;
+      if (hasGlobalVisibility) return true;
       const normalizedArea = normalizeString(area);
       return user?.allowedAreas.some(allowed => normalizeString(allowed) === normalizedArea);
   });
@@ -157,31 +153,66 @@ export const Catalog: React.FC = () => {
       }
   };
 
-  const filteredByStatus = areaProcedures.filter(proc => {
-      const rawStatus = proc.status ? String(proc.status) : 'VIGENTE';
-      const statusUpper = rawStatus.toUpperCase().trim();
-      const isExpired = statusUpper === 'CADUCO' || statusUpper === 'OBSOLETO' || statusUpper === 'HISTORICO';
-      return viewTab === 'active' ? !isExpired : isExpired;
-  });
+  const filteredByStatus = useMemo(() => {
+      return areaProcedures.filter(proc => {
+          const rawStatus = proc.status ? String(proc.status) : 'VIGENTE';
+          const statusUpper = rawStatus.toUpperCase().trim();
+          const isExpired = statusUpper === 'CADUCO' || statusUpper === 'OBSOLETO' || statusUpper === 'HISTORICO';
+          return viewTab === 'active' ? !isExpired : isExpired;
+      });
+  }, [areaProcedures, viewTab]);
 
-  let visibleFolders: Folder[] = [];
-  let visibleDocs: Procedure[] = [];
+  // --- LÓGICA DE VISUALIZACIÓN DE CARPETAS Y ARCHIVOS (CORREGIDA) ---
+  const { visibleFolders, visibleDocs } = useMemo(() => {
+    let folders: Folder[] = [];
+    let docs: Procedure[] = [];
 
-  if (selectedArea && !searchTerm) {
-      if (currentFolder) {
-          visibleFolders = []; 
-          visibleDocs = filteredByStatus.filter(p => p.folder_id === currentFolder.id);
-      } else {
-          const validFolderIds = areaFolders.map(f => f.id);
-          visibleDocs = filteredByStatus.filter(p => !p.folder_id || !validFolderIds.includes(p.folder_id));
-          visibleFolders = areaFolders.filter(folder => {
-              const matchingDocsCount = filteredByStatus.filter(p => p.folder_id === folder.id).length;
-              return matchingDocsCount > 0;
-          });
-      }
-  } else if (searchTerm) {
-      visibleDocs = areaProcedures; 
-  }
+    if (!selectedArea) return { visibleFolders: folders, visibleDocs: docs };
+    if (searchTerm) return { visibleFolders: [], visibleDocs: filteredByStatus };
+
+    if (currentFolder) {
+        // Vista interna de carpeta
+        docs = filteredByStatus.filter(p => p.folder_id === currentFolder.id);
+    } else {
+        // Directorio Principal (Raíz)
+        
+        // 1. SOLO mostramos archivos en raíz si REALMENTE no tienen folder_id.
+        // Si tienen un folder_id, DEBEN ir en una carpeta, exista o no en nuestro catálogo.
+        docs = filteredByStatus.filter(p => !p.folder_id || p.folder_id.trim() === "");
+
+        // 2. Obtener IDs únicos de carpetas requeridas por los documentos actuales
+        // Fix: Explicitly type Set to string to avoid 'unknown' type errors
+        const requiredFolderIds = new Set<string>(
+            filteredByStatus
+                .filter(p => p.folder_id && p.folder_id.trim() !== "")
+                .map(p => p.folder_id as string)
+        );
+
+        // 3. Cruzar con las carpetas que tenemos en DB
+        const catalogFolders = areaFolders.filter(f => requiredFolderIds.has(f.id));
+        // Fix: Explicitly type Set to string to avoid 'unknown' type errors
+        const catalogIds = new Set<string>(catalogFolders.map(f => f.id));
+
+        // 4. Crear carpetas "Auto-generadas" para archivos que tienen folder_id pero no nombre en DB
+        const missingFolders: Folder[] = [];
+        // Fix: Explicitly type 'id' as string to avoid 'unknown' property access errors
+        requiredFolderIds.forEach((id: string) => {
+            if (!catalogIds.has(id)) {
+                missingFolders.push({
+                    id,
+                    name: `SECCIÓN ADICIONAL (${id.substring(0, 5).toUpperCase()})`,
+                    parent_id: null,
+                    created_at: new Date().toISOString(),
+                    area: selectedArea
+                });
+            }
+        });
+
+        folders = [...catalogFolders, ...missingFolders].sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return { visibleFolders: folders, visibleDocs: docs };
+  }, [selectedArea, searchTerm, currentFolder, areaFolders, filteredByStatus, viewTab]);
 
   const getFolderCount = (folderId: string) => filteredByStatus.filter(p => p.folder_id === folderId).length;
 
@@ -284,10 +315,10 @@ export const Catalog: React.FC = () => {
         {selectedArea && !isSearching && !loading && (
             <div className="flex justify-between items-center mb-6">
                 <div className="flex space-x-1 bg-slate-800 p-1 rounded-lg border border-white/10">
-                    <button onClick={() => setViewTab('active')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center ${viewTab === 'active' ? 'bg-slate-900 text-indigo-400 shadow-sm border border-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
+                    <button onClick={() => { setViewTab('active'); setCurrentFolder(null); }} className={`px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center ${viewTab === 'active' ? 'bg-slate-900 text-indigo-400 shadow-sm border border-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
                         <CheckCircle size={16} className="mr-2" /> VIGENTES
                     </button>
-                    <button onClick={() => setViewTab('history')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center ${viewTab === 'history' ? 'bg-slate-700 text-gray-300 shadow-sm border border-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
+                    <button onClick={() => { setViewTab('history'); setCurrentFolder(null); }} className={`px-4 py-2 text-sm font-bold rounded-md transition-all flex items-center ${viewTab === 'history' ? 'bg-slate-700 text-gray-300 shadow-sm border border-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
                         <Clock size={16} className="mr-2" /> CADUCOS
                     </button>
                 </div>
@@ -389,7 +420,7 @@ export const Catalog: React.FC = () => {
                 <div>
                     {(visibleFolders.length > 0 && visibleDocs.length > 0) && (
                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center mt-8">
-                            <FileText size={14} className="mr-2" /> Archivos
+                            <FileText size={14} className="mr-2" /> Archivos en Raíz
                         </h3>
                     )}
 

@@ -2,217 +2,264 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { appwriteService } from '../services/appwriteService';
-import { Procedure, Stats, ADMIN_EMAILS } from '../types';
-import { FileText, Clock, AlertTriangle, Search, MessageSquare, Key, ArrowRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { Procedure, ADMIN_EMAILS } from '../types';
+import { 
+  FileText, Clock, AlertTriangle, Search, MessageSquare, Key, 
+  ArrowRight, ShieldCheck, Monitor, Cpu, 
+  Lightbulb, Grid, History, Radio, UserCheck, Shield
+} from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats | null>(null);
+  const navigate = useNavigate();
   const [recentDocs, setRecentDocs] = useState<Procedure[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [adminPendingTickets, setAdminPendingTickets] = useState(0);
-  const [adminPendingDownloads, setAdminPendingDownloads] = useState(0);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
       if (user) {
-        const s = await appwriteService.getStats(user.allowedAreas);
         const docs = await appwriteService.getProcedures(user); 
-        setStats(s);
-        setRecentDocs(docs.sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 3));
-
-        const isAdmin = user.email && ADMIN_EMAILS.includes(user.email);
-        if (isAdmin) {
-            try {
-                const [tickets, requests] = await Promise.all([
-                    appwriteService.adminGetConsultationMessages(),
-                    appwriteService.adminGetDownloadRequests()
-                ]);
-                setAdminPendingTickets(tickets.filter(t => t.status === 'pending').length);
-                setAdminPendingDownloads(requests.length);
-            } catch (error) {
-                console.error("Error cargando notificaciones admin", error);
-            }
-        }
+        setRecentDocs(docs.sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 5));
         setLoading(false);
       }
     };
     loadData();
   }, [user]);
 
-  if (loading || !user) return <div className="p-8 text-center text-gray-400">Cargando panel...</div>;
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchTerm.trim()) {
+        navigate('/catalog'); 
+    }
+  };
 
-  const data = [
-    { name: 'Vigentes', value: stats?.totalActive || 0, color: '#4f46e5' }, // Indigo 600
-    { name: 'En Revisión', value: stats?.totalReview || 0, color: '#ca8a04' }, // Yellow 600
-  ];
+  if (loading || !user) return (
+    <div className="flex items-center justify-center h-[60vh]">
+        <div className="flex flex-col items-center">
+            <Radio className="animate-pulse text-indigo-500 mb-4" size={48} />
+            <p className="text-gray-500 font-bold uppercase tracking-[0.2em] text-xs">Sincronizando Terminal...</p>
+        </div>
+    </div>
+  );
 
-  const isMultiArea = user.allowedAreas.length > 1;
-  const isAdmin = user.email && ADMIN_EMAILS.includes(user.email);
-  const hasAdminAlerts = adminPendingTickets > 0 || adminPendingDownloads > 0;
+  const isAdminByEmail = user.email && ADMIN_EMAILS.some(email => email.toLowerCase() === user.email.toLowerCase());
+  const isFullAdmin = isAdminByEmail || user.role === 'admin' || user.isImpersonating;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-700">
       
-      {isAdmin && hasAdminAlerts && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top duration-300">
-            {adminPendingTickets > 0 && (
-                <Link to="/admin/inbox" className="bg-slate-900 border-l-4 border-amber-500 rounded-xl p-4 shadow-md flex items-center justify-between hover:bg-white/5 transition-colors group">
-                    <div className="flex items-center">
-                        <div className="p-3 bg-amber-900/20 text-amber-500 rounded-full mr-4 group-hover:scale-110 transition-transform">
-                            <MessageSquare size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-gray-200 text-lg">{adminPendingTickets} Consultas Nuevas</h3>
-                            <p className="text-sm text-gray-500">Usuarios esperando respuesta en buzón.</p>
-                        </div>
-                    </div>
-                    <ArrowRight className="text-gray-600 group-hover:text-amber-500" />
-                </Link>
-            )}
+      {/* SECCIÓN SUPERIOR: BÚSQUEDA */}
+      <div className="relative group">
+        <form onSubmit={handleSearchSubmit} className="relative max-w-3xl mx-auto">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-indigo-400 group-focus-within:text-indigo-300 transition-colors" size={24} />
+            <input 
+                type="text"
+                placeholder="¿Qué proceso necesitas consultar hoy? (Escribe nombre o código...)"
+                className="w-full bg-slate-900/50 backdrop-blur-xl border-2 border-white/10 rounded-2xl py-6 pl-16 pr-8 text-xl text-white outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-2xl placeholder-gray-600 font-medium"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <div className="absolute right-6 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-2 pointer-events-none">
+                <span className="text-[10px] font-black text-gray-500 border border-white/10 px-2 py-1 rounded bg-black/20 tracking-tighter">ENTER PARA BUSCAR</span>
+            </div>
+        </form>
+      </div>
 
-            {adminPendingDownloads > 0 && (
-                <Link to="/admin/requests" className="bg-slate-900 border-l-4 border-indigo-500 rounded-xl p-4 shadow-md flex items-center justify-between hover:bg-white/5 transition-colors group">
-                    <div className="flex items-center">
-                        <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-full mr-4 group-hover:scale-110 transition-transform">
-                            <Key size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-gray-200 text-lg">{adminPendingDownloads} Solicitudes de Archivo</h3>
-                            <p className="text-sm text-gray-500">Usuarios solicitando descargar originales.</p>
-                        </div>
-                    </div>
-                    <ArrowRight className="text-gray-600 group-hover:text-indigo-400" />
-                </Link>
-            )}
-        </div>
-      )}
-
-      {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 rounded-2xl p-8 text-white shadow-xl border border-white/10 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full transform translate-x-1/2 -translate-y-1/2"></div>
+      {/* BENTO GRID LAYOUT */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         
-        <h1 className="text-3xl font-bold mb-2 relative z-10">Hola, {user.name.split(' ')[0]}</h1>
-        
-        <div className="relative z-10 mb-6">
-            <p className="text-gray-300 mb-2">
-                Bienvenido al portal corporativo. Tienes permisos activos para consultar la documentación de:
-            </p>
+        {/* BLOQUE 1: RESUMEN DE IDENTIDAD (IZQUIERDA) */}
+        <div className="md:col-span-4 space-y-6">
             
-            {isMultiArea ? (
-                <div className="flex flex-wrap gap-2 mt-2">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 relative overflow-hidden group shadow-xl">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                    {isFullAdmin ? <Cpu size={80} className="text-indigo-400" /> : <UserCheck size={80} className="text-indigo-400" />}
+                </div>
+                
+                <div className="flex items-center gap-4 mb-6">
+                    <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center overflow-hidden border-2 border-indigo-400/30 shadow-lg shadow-indigo-900/40">
+                        {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <span className="text-2xl font-black text-white">{user.name.charAt(0)}</span>}
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-black text-white leading-tight uppercase">{user.name.split(' ')[0]} {user.name.split(' ')[1] || ''}</h3>
+                        <p className="text-xs text-indigo-400 font-bold uppercase tracking-widest">{user.area}</p>
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    {isFullAdmin ? (
+                        <div className="bg-black/40 rounded-2xl p-4 border border-white/5 animate-in slide-in-from-left">
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.1em] mb-2 flex items-center">
+                                <Monitor size={12} className="mr-2" /> ID Hardware Autorizado
+                            </p>
+                            <p className="text-sm font-mono text-indigo-300 truncate tracking-tighter">{user.lastDeviceId}</p>
+                        </div>
+                    ) : (
+                        <div className="bg-emerald-950/20 rounded-2xl p-4 border border-emerald-500/10">
+                            <p className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.1em] mb-1 flex items-center">
+                                <Shield size={12} className="mr-2" /> Acceso Validado
+                            </p>
+                            <p className="text-xs text-emerald-200/60 leading-tight">Tu identidad digital y firma de privacidad están vigentes en el sistema.</p>
+                        </div>
+                    )}
+                    
+                    <div className="flex items-center justify-between px-2">
+                        <div className="flex items-center gap-2">
+                            <ShieldCheck size={16} className="text-emerald-500" />
+                            <span className="text-[10px] font-black text-gray-300 uppercase">Estatus: Perfil Operativo</span>
+                        </div>
+                        <Link to="/profile" className="text-indigo-400 hover:text-white transition-colors">
+                            <ArrowRight size={16} />
+                        </Link>
+                    </div>
+                </div>
+            </div>
+
+            {/* Accesos de Área */}
+            <div className="bg-indigo-950/20 border border-indigo-500/20 rounded-3xl p-6 shadow-xl">
+                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
+                    <Grid size={16} className="mr-2" /> Canales de Visibilidad
+                </h4>
+                <div className="flex flex-wrap gap-2">
                     {user.allowedAreas.map((area, idx) => (
-                        <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/10 border border-white/10 text-gray-200 backdrop-blur-sm uppercase">
+                        <span key={idx} className="bg-slate-900 text-gray-300 px-3 py-1.5 rounded-xl text-[10px] font-bold border border-white/5 uppercase shadow-sm">
                             {area}
                         </span>
                     ))}
                 </div>
-            ) : (
-                <span className="font-bold text-white bg-white/10 px-2 py-0.5 rounded border border-white/10 inline-block mt-1 uppercase">
-                    {user.area}
-                </span>
-            )}
-        </div>
-
-        <div className="flex flex-wrap gap-3 relative z-10 items-center">
-          <Link to="/catalog" className="bg-white text-slate-900 px-6 py-2.5 rounded-lg font-bold hover:bg-gray-200 transition-colors inline-flex items-center shadow-md">
-            <Search size={18} className="mr-2" />
-            Buscar Procedimiento
-          </Link>
-          <div className="text-sm font-medium text-gray-400 ml-2">
-              Total visible: <span className="font-bold text-white">{stats?.totalActive}</span> docs vigentes.
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Stats Card */}
-        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-white/10 col-span-1">
-          <h3 className="text-lg font-bold text-white mb-4 border-b border-white/5 pb-2">Estado de Documentación</h3>
-          <div className="h-48">
-             <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#fff' }} 
-                    itemStyle={{ color: '#e2e8f0' }}
-                  />
-                </PieChart>
-             </ResponsiveContainer>
-          </div>
-          <div className="flex justify-center space-x-6 text-sm">
-            <div className="flex items-center">
-              <span className="w-3 h-3 rounded-full bg-indigo-600 mr-2 shadow-sm"></span>
-              <span className="text-gray-400 font-medium">Vigentes ({stats?.totalActive})</span>
+                <p className="text-[10px] text-gray-500 mt-4 leading-relaxed italic">
+                    Acceso configurado por el administrador según tu perfil.
+                </p>
             </div>
-             <div className="flex items-center">
-              <span className="w-3 h-3 rounded-full bg-yellow-600 mr-2 shadow-sm"></span>
-              <span className="text-gray-400 font-medium">Revisión ({stats?.totalReview})</span>
-            </div>
-          </div>
         </div>
 
-        {/* Recent Updates */}
-        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-white/10 col-span-1 lg:col-span-2">
-          <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-2">
-             <h3 className="text-lg font-bold text-white">Actualizaciones Recientes</h3>
-             <Link to="/catalog" className="text-sm font-semibold text-indigo-400 hover:text-indigo-300 hover:underline">Ver todos</Link>
-          </div>
-          
-          <div className="space-y-4">
-            {recentDocs.length === 0 ? (
-              <p className="text-gray-500 italic">No hay actualizaciones recientes.</p>
-            ) : (
-              recentDocs.map(doc => (
-                <div key={doc.$id} className="flex items-start p-4 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-transparent hover:border-indigo-500/30 cursor-pointer group relative">
-                  <div className="p-2 bg-slate-800 rounded-lg border border-white/10 text-indigo-400 mr-4 group-hover:text-white shadow-sm">
-                    <FileText size={20} />
-                  </div>
-                  <Link to={`/procedure/${doc.$id}`} className="flex-1">
-                    <div className="flex justify-between items-start">
-                      <h4 className="font-bold text-gray-200 group-hover:text-white">{doc.name}</h4>
-                      <span className={`text-xs px-2 py-1 rounded-full font-bold ${doc.status === 'Vigente' ? 'bg-indigo-900/50 text-indigo-300' : 'bg-amber-900/50 text-amber-300'}`}>
-                        {doc.status}
-                      </span>
+        {/* BLOQUE 2: ATAJOS Y ACCIONES (CENTRO) */}
+        <div className="md:col-span-4 space-y-6">
+            <h4 className="text-xs font-black text-gray-500 uppercase tracking-[0.3em] pl-2">Centro de Operaciones</h4>
+            
+            <Link to="/catalog" className="flex items-center justify-between p-6 bg-slate-900 border border-white/10 rounded-3xl hover:border-indigo-500/50 hover:bg-white/5 transition-all group shadow-xl">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-900/30 text-indigo-400 rounded-2xl group-hover:scale-110 transition-transform">
+                        <Grid size={24} />
                     </div>
-                    <p className="text-sm text-gray-500 mt-1">
-                        <span className="font-mono text-gray-600">{doc.code}</span> • <span className="font-bold text-indigo-400 uppercase">{doc.area}</span> • v{doc.version}
-                    </p>
-                    <div className="flex items-center mt-2 text-xs text-gray-600">
-                      <Clock size={12} className="mr-1" />
-                      Actualizado el {new Date(doc.updatedAt).toLocaleDateString()}
+                    <div>
+                        <h5 className="font-bold text-white uppercase">Catálogo</h5>
+                        <p className="text-xs text-gray-500">Manuales y procesos oficiales.</p>
                     </div>
-                  </Link>
                 </div>
-              ))
+                <ChevronRightIcon />
+            </Link>
+
+            <Link to="/consultation" className="flex items-center justify-between p-6 bg-slate-900 border border-white/10 rounded-3xl hover:border-amber-500/50 hover:bg-white/5 transition-all group shadow-xl">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-amber-900/30 text-amber-500 rounded-2xl group-hover:scale-110 transition-transform">
+                        <MessageSquare size={24} />
+                    </div>
+                    <div>
+                        <h5 className="font-bold text-white uppercase">Soporte Operativo</h5>
+                        <p className="text-xs text-gray-500">Mesa de dudas y consultas.</p>
+                    </div>
+                </div>
+                <ChevronRightIcon />
+            </Link>
+
+            <Link to="/proposals" className="flex items-center justify-between p-6 bg-slate-900 border border-white/10 rounded-3xl hover:border-cyan-500/50 hover:bg-white/5 transition-all group shadow-xl">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-cyan-900/30 text-cyan-400 rounded-2xl group-hover:scale-110 transition-transform">
+                        <Lightbulb size={24} />
+                    </div>
+                    <div>
+                        <h5 className="font-bold text-white uppercase">Mejora Continua</h5>
+                        <p className="text-xs text-gray-500">Ideas para optimizar tu área.</p>
+                    </div>
+                </div>
+                <ChevronRightIcon />
+            </Link>
+
+            {isFullAdmin && (
+                <Link to="/admin" className="flex items-center justify-between p-6 bg-red-950/10 border border-red-500/20 rounded-3xl hover:border-red-500/50 hover:bg-red-900/10 transition-all group shadow-xl">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-red-900/30 text-red-500 rounded-2xl">
+                            <Key size={24} />
+                        </div>
+                        <div>
+                            <h5 className="font-bold text-white uppercase">Administración</h5>
+                            <p className="text-xs text-gray-500">Gestión global del sistema.</p>
+                        </div>
+                    </div>
+                    <ChevronRightIcon />
+                </Link>
             )}
-          </div>
         </div>
+
+        {/* BLOQUE 3: FEED DE ACTIVIDAD (DERECHA) */}
+        <div className="md:col-span-4 bg-slate-900 border border-white/10 rounded-3xl overflow-hidden flex flex-col shadow-xl">
+            <div className="p-6 border-b border-white/5 bg-slate-950/30 flex justify-between items-center">
+                <h4 className="text-xs font-black text-gray-200 uppercase tracking-widest flex items-center">
+                    <History size={16} className="mr-2 text-indigo-400" /> Novedades del Área
+                </h4>
+                <div className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {recentDocs.length === 0 ? (
+                    <div className="py-20 text-center">
+                        <FileText className="mx-auto text-slate-800 mb-4" size={40} />
+                        <p className="text-gray-600 text-xs font-bold uppercase">Sin actividad reciente</p>
+                    </div>
+                ) : (
+                    recentDocs.map(doc => (
+                        <Link 
+                            key={doc.$id} 
+                            to={`/procedure/${doc.$id}`}
+                            className="flex items-start gap-3 p-3 rounded-2xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5 group"
+                        >
+                            <div className="shrink-0 p-2 bg-slate-800 rounded-xl text-gray-500 group-hover:text-indigo-400 transition-colors">
+                                <FileText size={18} />
+                            </div>
+                            <div className="min-w-0">
+                                <h6 className="text-sm font-bold text-gray-300 truncate group-hover:text-white transition-colors">{doc.name}</h6>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-tighter">{doc.area}</span>
+                                    <span className="text-[9px] text-gray-600 font-mono">v{doc.version}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-600 mt-1 flex items-center">
+                                    <Clock size={10} className="mr-1" /> {new Date(doc.updatedAt).toLocaleDateString()}
+                                </p>
+                            </div>
+                        </Link>
+                    ))
+                )}
+            </div>
+            
+            <Link to="/catalog" className="p-4 bg-slate-950/50 text-center text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-[0.2em] border-t border-white/5 transition-colors">
+                Explorar Catálogo Completo
+            </Link>
+        </div>
+
       </div>
-      
-      <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl p-4 flex items-start shadow-sm">
-        <AlertTriangle className="text-amber-500 mr-3 mt-0.5 flex-shrink-0" />
+
+      {/* ADVERTENCIA OPERACIONAL */}
+      <div className="bg-amber-900/10 border border-amber-700/30 rounded-3xl p-6 flex items-start shadow-sm backdrop-blur-sm relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+        <AlertTriangle className="text-amber-500 mr-4 mt-0.5 flex-shrink-0" size={24} />
         <div>
-           <h4 className="font-bold text-amber-400 text-sm">Recordatorio de Revisión Mensual</h4>
-           <p className="text-amber-200/70 text-sm mt-1">Recuerda revisar los procedimientos marcados como "En Revisión" antes del día 30 del mes corriente.</p>
+           <h4 className="font-black text-amber-400 text-xs uppercase tracking-widest mb-1">Protección de la Información Operacional</h4>
+           <p className="text-amber-200/60 text-sm leading-relaxed max-w-4xl">
+               De acuerdo al <strong>ACUR CODEX</strong>, la información consultada en esta plataforma es propiedad exclusiva de la Corporación. 
+               Cualquier intento de extracción, impresión no autorizada o compartición de credenciales será registrado y escalado al Departamento Legal.
+           </p>
         </div>
       </div>
     </div>
   );
 };
+
+const ChevronRightIcon = () => (
+    <ArrowRight className="text-gray-700 group-hover:text-white group-hover:translate-x-1 transition-all" size={20} />
+);

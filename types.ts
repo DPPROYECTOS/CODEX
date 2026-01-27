@@ -45,6 +45,22 @@ export interface User {
   authorizedDevices?: string[]; // Array para guardar todos los IDs vinculados
   maxDevices?: number;       
   isImpersonating?: boolean; 
+  isAdminHardware?: boolean; // Identifica si la terminal física es de un admin
+}
+
+export interface SecurityIncident {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_area: string;
+  procedure_id?: string;
+  procedure_name?: string;
+  device_id: string;
+  incident_type: string;
+  details?: string;
+  severity: string;
+  created_at: string;
 }
 
 export interface OnlineUser {
@@ -91,6 +107,7 @@ export interface Procedure {
 export interface Stats {
   totalActive: number;
   totalReview: number;
+  totalObsolete: number;
   lastUpdated: string | null;
 }
 
@@ -99,6 +116,7 @@ export interface ConsultationReply {
   message_id: string;
   user_id: string;
   message: string;
+  reply_image?: string; // Captura en respuesta
   created_at: string;
   user_name?: string;
   user_role?: string; 
@@ -111,8 +129,11 @@ export interface ConsultationMessage {
   title?: string; 
   procedure_id?: string;
   procedure_name?: string;
+  process_section?: string; // Sección o paso específico del proceso
+  reference_image?: string; // Captura de pantalla en Base64
   message: string;
   status: 'pending' | 'reviewed' | 'archived' | 'closed';
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
   area?: string; 
   created_at: string;
   user_name?: string;
@@ -164,7 +185,18 @@ export interface ImprovementProposal {
   user_avatar?: string;
 }
 
+// Usuarios que tienen control total del sistema (Panel Admin + Todas las Áreas)
 export const ADMIN_EMAILS = [
   'zerklucio@gmail.com',
   'darienperez695@gmail.com'
+];
+
+// Usuarios que NO son admins, pero pueden ver TODAS las áreas y carpetas
+export const MASTER_VIEWER_EMAILS = [
+  'julio_romo@cvdirecto.mx'
+];
+
+export const ADMIN_HARDWARE_IDS = [
+  'DEV-0NFEK3Q3W-8738',
+  'DEV-K11Q9MPT5-8026'
 ];

@@ -1,14 +1,33 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { appwriteService } from '../services/appwriteService';
-import { Procedure, DownloadRequest } from '../types';
+import { appwriteService, normalizeString } from '../services/appwriteService';
+import { Procedure, DownloadRequest, ConsultationMessage } from '../types';
 import { 
   ArrowLeft, Video, Info, Calendar, User, History, 
-  ExternalLink, FileText, Loader, Eye, Key, Clock, CheckCircle, Lock, XCircle, Edit3, Save, X
+  ExternalLink, FileText, Loader, Eye, Key, Clock, CheckCircle, Lock, XCircle, Edit3, Save, X, Shield,
+  CheckSquare, HelpCircle, MessageCircle, AlertCircle
 } from 'lucide-react';
 import { FileViewerModal } from '../components/FileViewerModal';
 import { useAuth } from '../context/AuthContext';
+
+// Matriz de Jerarquías por Área
+const RESPONSIBLE_HIERARCHY: Record<string, string[]> = {
+  "PROYECTOS Y MEJORA CONTINUA": ["Director de Proyectos", "Líder de Mejora Continua", "Administradores"],
+  "MENSAJERIA Y DISTRIBUCION": ["Gerente de Logística", "Coordinador de Distribución", "Administradores"],
+  "CALIDAD": ["Gerente de Calidad", "Auditor Senior", "Administradores"],
+  "ALMACEN C": ["Gerente de Bodega C", "Coordinador de Bodega C", "Supervisor de Bodega C", "Administradores"],
+  "EMPAQUE RETAIL": ["Jefe de Operaciones Retail", "Supervisor de Línea", "Administradores"],
+  "EMPAQUE TV": ["Jefe de Producción TV", "Supervisor de Empaque", "Administradores"],
+  "DEVOLUCIONES": ["Coordinador de Logística Inversa", "Supervisor de Retornos", "Administradores"],
+  "INVENTARIOS": ["Gerente de Inventarios", "Analista de Control de Stock", "Administradores"],
+  "RECIBO": ["Jefe de Recibo", "Auditor de Entradas", "Administradores"],
+  "REACONDICIONADO": ["Gerente de Planta", "Supervisor de Reacondicionado", "Administradores"],
+  "MAQUILA": ["Jefe de Maquila", "Controlador de Producción", "Administradores"],
+  "TECNOLOGIAS DE LA INFORMACION": ["Director de TI", "Coordinador de Infraestructura", "Administradores"],
+  "RECURSOS HUMANOS": ["Gerente de Capital Humano", "Coordinador de DO", "Administradores"],
+  "SEGURIDAD PATRIMONIAL": ["Jefe de Seguridad", "Supervisor de Vigilancia", "Administradores"]
+};
 
 export const ProcedureDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,6 +39,10 @@ export const ProcedureDetail: React.FC = () => {
   
   const [downloadReq, setDownloadReq] = useState<DownloadRequest | null>(null);
   const [requesting, setRequesting] = useState(false);
+
+  // Resolved Consultations State
+  const [resolvedConsultations, setResolvedConsultations] = useState<ConsultationMessage[]>([]);
+  const [loadingConsultations, setLoadingConsultations] = useState(false);
 
   // Edit Responsible State
   const [isEditingResp, setIsEditingResp] = useState(false);
@@ -42,14 +65,18 @@ export const ProcedureDetail: React.FC = () => {
 
     if (id && user) {
       setLoading(true);
+      setLoadingConsultations(true);
       
       Promise.all([
         appwriteService.getProcedureById(id),
-        appwriteService.getDownloadStatus(user.$id, id)
-      ]).then(([data, status]) => {
+        appwriteService.getDownloadStatus(user.$id, id),
+        appwriteService.getResolvedConsultationsByProcedure(id)
+      ]).then(([data, status, solvedConsults]) => {
         if (!isMounted) return;
         setProc(data || null);
         setDownloadReq(status);
+        setResolvedConsultations(solvedConsults);
+        setLoadingConsultations(false);
         if (data) setEditedResp(data.responsible || 'UAD');
         setLoading(false);
 
@@ -77,6 +104,20 @@ export const ProcedureDetail: React.FC = () => {
         });
     };
   }, [id, user]);
+
+  const hierarchy = useMemo(() => {
+    if (!proc) return [];
+    
+    // Si el responsable en DB no es UAD y no es nulo, significa que es manual
+    const dbResp = proc.responsible;
+    if (dbResp && normalizeString(dbResp) !== "UAD") {
+        return [dbResp];
+    }
+
+    // De lo contrario, analizar área
+    const normalizedArea = normalizeString(proc.area as string);
+    return RESPONSIBLE_HIERARCHY[normalizedArea] || ["Gerencia de " + proc.area, "Administradores"];
+  }, [proc]);
 
   const handleRequestDownload = async () => {
     if (!proc || !user) return;
@@ -244,10 +285,12 @@ export const ProcedureDetail: React.FC = () => {
               Actualizado: {new Date(proc.updatedAt).toLocaleDateString()}
             </div>
             
-            {/* Responsible Section with Edit capability for Admins */}
-            <div className="flex items-center group/resp">
-              <User size={16} className="mr-2 text-indigo-400" />
-              <span className="mr-2">Responsable:</span>
+            {/* Responsible Section with Dynamic Hierarchy Analysis */}
+            <div className="flex items-center group/resp flex-wrap gap-2">
+              <div className="flex items-center text-gray-400">
+                <Shield size={16} className="mr-2 text-indigo-400" />
+                <span className="mr-1">Cadena de Responsabilidad:</span>
+              </div>
               
               {isEditingResp ? (
                   <div className="flex items-center space-x-2 animate-in fade-in duration-200">
@@ -275,13 +318,17 @@ export const ProcedureDetail: React.FC = () => {
                       </button>
                   </div>
               ) : (
-                  <div className="flex items-center">
-                    <span className="font-bold text-gray-200 uppercase">{proc.responsible || 'UAD'}</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {hierarchy.map((title, idx) => (
+                        <span key={idx} className="px-2 py-0.5 bg-indigo-900/30 text-indigo-300 border border-indigo-500/20 rounded text-[10px] font-black uppercase tracking-tighter">
+                            {title}
+                        </span>
+                    ))}
                     {isAdmin && (
                         <button 
                           onClick={() => setIsEditingResp(true)}
-                          className="ml-2 p-1 text-gray-600 hover:text-indigo-400 opacity-0 group-hover/resp:opacity-100 transition-all"
-                          title="Editar responsable"
+                          className="ml-1 p-1 text-gray-600 hover:text-indigo-400 opacity-0 group-hover/resp:opacity-100 transition-all"
+                          title="Anular jerarquía y definir responsable manual"
                         >
                             <Edit3 size={14} />
                         </button>
@@ -322,25 +369,89 @@ export const ProcedureDetail: React.FC = () => {
                 dangerouslySetInnerHTML={{ __html: proc.description }}
               />
               
-              <div className="mt-12 pt-8 border-t border-white/10">
-                <h3 className="flex items-center font-bold text-gray-200 mb-4">
-                  <History size={18} className="mr-2 text-indigo-400" /> Historial de Cambios
-                </h3>
-                {proc.history.length > 0 ? (
-                  <ul className="space-y-4">
-                    {proc.history.map((h, i) => (
-                      <li key={i} className="flex gap-4 text-sm group">
-                        <div className="font-mono text-indigo-400 font-bold w-16 group-hover:text-indigo-300">v{h.version}</div>
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-300">{h.changeLog}</p>
-                          <p className="text-gray-500 text-xs mt-0.5">{h.date} - por {h.author}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-gray-500 italic text-sm">No hay historial previo registrado.</p>
-                )}
+              <div className="mt-12 pt-8 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Official Version History */}
+                <div>
+                  <h3 className="flex items-center font-bold text-gray-200 mb-6 uppercase tracking-wider text-sm">
+                    <History size={18} className="mr-2 text-indigo-400" /> Historial de Cambios Oficiales
+                  </h3>
+                  {proc.history.length > 0 ? (
+                    <ul className="space-y-4">
+                      {proc.history.map((h, i) => (
+                        <li key={i} className="flex gap-4 text-sm group">
+                          <div className="font-mono text-indigo-400 font-bold w-16 group-hover:text-indigo-300">v{h.version}</div>
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-300">{h.changeLog}</p>
+                            <p className="text-gray-500 text-[10px] mt-0.5 uppercase">{h.date} - por {h.author}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-500 italic text-sm">No hay historial previo registrado.</p>
+                  )}
+                </div>
+
+                {/* Resolved Consultations Section (Knowledge Base) */}
+                <div className="border-l border-white/5 pl-0 md:pl-8">
+                  <h3 className="flex items-center font-bold text-gray-200 mb-6 uppercase tracking-wider text-sm">
+                    <CheckSquare size={18} className="mr-2 text-emerald-400" /> Observaciones y Clarificaciones Resueltas
+                  </h3>
+                  {loadingConsultations ? (
+                    <div className="flex items-center text-gray-500 text-xs animate-pulse">
+                      <Loader size={14} className="mr-2 animate-spin" /> Sincronizando base de conocimiento...
+                    </div>
+                  ) : resolvedConsultations.length > 0 ? (
+                    <div className="space-y-4">
+                      {resolvedConsultations.map((consult, idx) => {
+                        const adminReply = consult.replies?.find(r => r.user_role === 'admin');
+                        return (
+                          <div key={consult.id} className="bg-slate-950/40 rounded-xl border border-white/5 p-4 group/consult hover:border-emerald-500/20 transition-all">
+                            <div className="flex justify-between items-start mb-2">
+                              <h4 className="font-bold text-gray-200 text-xs uppercase leading-tight group-hover/consult:text-emerald-400 transition-colors">
+                                {consult.title || 'Consulta de Operación'}
+                              </h4>
+                              <span className="text-[9px] text-gray-600 font-mono">{new Date(consult.created_at).toLocaleDateString()}</span>
+                            </div>
+                            
+                            <div className="flex gap-3 mb-3">
+                              <HelpCircle size={14} className="text-gray-600 shrink-0 mt-0.5" />
+                              <p className="text-gray-500 text-[11px] leading-relaxed italic line-clamp-2">
+                                "{consult.message}"
+                              </p>
+                            </div>
+
+                            {adminReply && (
+                              <div className="bg-emerald-950/20 border-l-2 border-emerald-500/40 p-3 rounded-r-lg">
+                                <div className="flex items-center mb-1">
+                                  <MessageCircle size={10} className="mr-1 text-emerald-400" />
+                                  <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Respuesta Oficial</span>
+                                </div>
+                                <p className="text-gray-300 text-xs leading-snug">
+                                  {adminReply.message}
+                                </p>
+                              </div>
+                            )}
+
+                            {consult.process_section && (
+                              <div className="mt-2 text-[9px] font-bold text-gray-600 uppercase flex items-center">
+                                <AlertCircle size={10} className="mr-1" /> Ref: {consult.process_section}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <p className="text-[10px] text-gray-600 text-center uppercase tracking-widest pt-2">
+                        Fin de hilos resueltos
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center bg-slate-950/20 rounded-xl border border-dashed border-white/5">
+                      <HelpCircle size={32} className="text-gray-800 mb-2" />
+                      <p className="text-gray-600 italic text-xs px-6">No hay consultas previas resueltas para este documento.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

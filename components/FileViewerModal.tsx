@@ -1,45 +1,102 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Loader, Download, FileText, AlertTriangle, Lock, ShieldCheck, RefreshCw, Layers, ZoomIn, ZoomOut, Maximize2, ShieldAlert } from 'lucide-react';
+import { X, Loader, Download, FileText, AlertTriangle, Lock, ShieldCheck, RefreshCw, Layers, ZoomIn, ZoomOut, Maximize2, ShieldAlert, Flag } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { appwriteService } from '../services/appwriteService';
+import { useNavigate } from 'react-router-dom';
 
 interface FileViewerModalProps {
   fileUrl: string;
   fileName: string;
+  procedureId?: string;
   onClose: () => void;
 }
 
-export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileName, onClose }) => {
+export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileName, procedureId, onClose }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [viewerEngine, setViewerEngine] = useState<'ms-office' | 'google-drive' | 'ms-view'>('ms-office');
   const [zoomScale, setZoomScale] = useState(1);
   const [isWindowBlurred, setIsWindowBlurred] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
+  
+  const hasLoggedIncidentRef = useRef<Record<string, boolean>>({});
 
-  // --- LÓGICA DE ESCUDO DE PRIVACIDAD ---
-  useEffect(() => {
-    const handleBlur = () => setIsWindowBlurred(true);
-    const handleFocus = () => setIsWindowBlurred(false);
+  const triggerSecurityLog = (type: string, details: string) => {
+    // Evitar spam de logs idénticos en la misma sesión de visor
+    const lockKey = `${type}-${details}`;
+    if (hasLoggedIncidentRef.current[lockKey] || !user) return;
     
-    // Bloqueo de teclado (Ctrl+S, Ctrl+P)
+    hasLoggedIncidentRef.current[lockKey] = true;
+    appwriteService.logSecurityIncident({
+        user_id: user.$id,
+        user_name: user.name,
+        user_email: user.email,
+        user_area: user.area,
+        procedure_id: procedureId,
+        procedure_name: fileName,
+        device_id: appwriteService.getDeviceId(),
+        incident_type: type,
+        details: details,
+        severity: 'CRITICAL'
+    });
+  };
+
+  // --- LÓGICA DE ESCUDO DE PRIVACIDAD MULTI-SENSOR ---
+  useEffect(() => {
+    const handleBlur = () => {
+        setIsWindowBlurred(true);
+        triggerSecurityLog('FOCUS_LOST_ATTEMPT', 'Pérdida de foco (Posible herramienta de recorte o cambio de aplicación)');
+    };
+    
+    const handleFocus = () => {
+        setIsWindowBlurred(false);
+        // Permitir registrar nuevos eventos tras recuperar el foco
+        hasLoggedIncidentRef.current = {};
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+        e.preventDefault();
+        triggerSecurityLog('COPY_ATTEMPT', 'Intento de copiado de contenido (Ctrl+C o Menú Navegador)');
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        triggerSecurityLog('CONTEXT_MENU', 'Intento de apertura de menú contextual (Clic Derecho)');
+    };
+    
     const handleKeyDown = (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'p')) {
+        const isMod = e.ctrlKey || e.metaKey;
+        
+        if (isMod && e.key === 'p') {
             e.preventDefault();
+            triggerSecurityLog('PRINT_ATTEMPT', 'Intento de impresión del documento (Ctrl+P)');
+        }
+        if (isMod && e.key === 's') {
+            e.preventDefault();
+            triggerSecurityLog('SAVE_ATTEMPT', 'Intento de guardado local (Bypass de descarga - Ctrl+S)');
+        }
+        if (isMod && (e.key === 'c' || e.key === 'x')) {
+            triggerSecurityLog('COPY_ATTEMPT', 'Intento de copiado/corte vía teclado (Ctrl+C/X)');
         }
     };
 
     window.addEventListener('blur', handleBlur);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
         window.removeEventListener('blur', handleBlur);
         window.removeEventListener('focus', handleFocus);
         window.removeEventListener('keydown', handleKeyDown);
+        document.removeEventListener('copy', handleCopy);
+        document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, []);
+  }, [user, procedureId, fileName]);
 
   const getFileType = (url: string) => {
     try {
@@ -77,7 +134,16 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
     }
   };
 
-  // --- CAPA DE MARCA DE AGUA DINÁMICA ---
+  const handleReportFinding = () => {
+      onClose();
+      navigate('/consultation', { 
+          state: { 
+              procedureId: procedureId, 
+              procedureName: fileName 
+          } 
+      });
+  };
+
   const WatermarkOverlay = () => (
     <div className="absolute inset-0 z-[60] pointer-events-none overflow-hidden opacity-[0.04] select-none no-print">
         <div className="flex flex-wrap w-[200%] h-[200%] -rotate-45 -translate-x-1/4 -translate-y-1/4">
@@ -119,7 +185,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
     switch (fileType) {
       case 'pdf':
         return (
-          <div className="w-full h-full relative bg-white overflow-hidden print:hidden" onContextMenu={e => e.preventDefault()}>
+          <div className="w-full h-full relative bg-white overflow-hidden print:hidden">
             <SecurityBlock />
             <WatermarkOverlay />
             <iframe src={`https://docs.google.com/gview?url=${encodedUrl}&embedded=true`} className="w-full h-full border-none relative z-10" onLoad={handleLoad} onError={handleError} title="PDF Viewer" />
@@ -127,7 +193,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
         );
       case 'visio':
         return (
-          <div className="w-full h-full relative overflow-hidden bg-white print:hidden" onContextMenu={e => e.preventDefault()}>
+          <div className="w-full h-full relative overflow-hidden bg-white print:hidden">
               <SecurityBlock width="w-[140px]" height="h-[40px]" />
               <WatermarkOverlay />
               <iframe src={iframeSrc} className="absolute top-0 left-0 w-full h-full border-none z-10" onLoad={handleLoad} onError={handleError} key={viewerEngine} title="Visio Viewer" />
@@ -135,7 +201,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
         );
       case 'office':
         return (
-          <div className="w-full h-full relative overflow-hidden bg-white print:hidden" onContextMenu={e => e.preventDefault()}>
+          <div className="w-full h-full relative overflow-hidden bg-white print:hidden">
               <SecurityBlock width="w-[280px]" height="h-[52px]" />
               <WatermarkOverlay />
               <iframe src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`} className="absolute top-0 left-0 w-full h-[calc(100%+50px)] border-none z-10" onLoad={handleLoad} onError={handleError} title="Office Viewer" />
@@ -143,7 +209,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
         );
       case 'image':
         return (
-          <div className="w-full h-full relative bg-[#050505] flex flex-col overflow-hidden print:hidden" onContextMenu={e => e.preventDefault()}>
+          <div className="w-full h-full relative bg-[#050505] flex flex-col overflow-hidden print:hidden">
               <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[200] flex items-center bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-2xl p-2 shadow-2xl no-print">
                   <button onClick={handleZoomOut} className="p-2.5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl transition-all"><ZoomOut size={22} /></button>
                   <div className="px-5 min-w-[90px] text-center border-x border-white/10 mx-1"><span className="text-sm font-black text-indigo-400 font-mono">{Math.round(zoomScale * 100)}%</span></div>
@@ -176,7 +242,6 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-sm p-2 sm:p-6 animate-in fade-in duration-200" onClick={onClose}>
       <div className="w-full max-w-7xl h-full max-h-[92vh] flex flex-col bg-[#0B0C15] rounded-xl border border-indigo-500/30 shadow-2xl overflow-hidden relative" onClick={(e) => e.stopPropagation()}>
         
-        {/* ESCUDO DE BLACKOUT ACTIVO */}
         {isWindowBlurred && (
             <div className="absolute inset-0 z-[1000] bg-black flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-100">
                 <div className="bg-red-900/20 p-6 rounded-full border border-red-500/50 mb-6 animate-pulse">
@@ -196,9 +261,20 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
                 <div className="p-1.5 bg-indigo-900/40 rounded border border-indigo-500/30 text-indigo-300 shrink-0"><ShieldCheck size={18} /></div>
                 <div className="min-w-0"><h3 className="text-sm md:text-base font-bold text-white truncate font-display tracking-wide uppercase">{fileName}</h3></div>
             </div>
-            <button onClick={onClose} className="flex items-center justify-center px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors font-bold text-xs uppercase tracking-widest shadow-lg ml-4 shrink-0">
-                <span className="mr-2 hidden sm:inline">Cerrar</span><X size={20} />
-            </button>
+            
+            <div className="flex items-center space-x-2">
+                <button 
+                    onClick={handleReportFinding}
+                    className="flex items-center justify-center px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors font-bold text-xs uppercase tracking-widest shadow-lg"
+                    title="Reportar un hallazgo o duda sobre este documento"
+                >
+                    <Flag size={16} className="mr-2" />
+                    <span className="hidden sm:inline">Reportar Hallazgo</span>
+                </button>
+                <button onClick={onClose} className="flex items-center justify-center px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors font-bold text-xs uppercase tracking-widest shadow-lg shrink-0">
+                    <span className="mr-2 hidden sm:inline">Cerrar</span><X size={20} />
+                </button>
+            </div>
         </div>
 
         <div className="flex-1 bg-slate-950 relative w-full h-full overflow-hidden flex flex-col">

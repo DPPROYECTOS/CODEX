@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { NavLink, Outlet, useLocation, Link } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, Link, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -16,16 +16,19 @@ import {
   FileCheck,
   TrendingUp,
   Lightbulb,
-  User as UserIcon
+  User as UserIcon,
+  XCircle,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ADMIN_EMAILS } from '../types';
 
 export const Layout: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, stopImpersonating } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   React.useEffect(() => {
     setMobileMenuOpen(false);
@@ -33,6 +36,11 @@ export const Layout: React.FC = () => {
   }, [location]);
 
   if (!user) return null;
+
+  const handleStopImpersonating = () => {
+    stopImpersonating();
+    navigate('/admin');
+  };
 
   // Normalizar correos para comparación robusta
   const isAdmin = user.email && ADMIN_EMAILS.some(email => email.toLowerCase() === user.email.toLowerCase());
@@ -47,6 +55,7 @@ export const Layout: React.FC = () => {
 
   if (isAdmin) {
     links.push({ to: '/admin', icon: Shield, label: 'Administrador' });
+    links.push({ to: '/admin/incidents', icon: ShieldAlert, label: 'Alertas de Seguridad' });
     links.push({ to: '/admin/analytics', icon: TrendingUp, label: 'Analíticas' });
     links.push({ to: '/admin/requests', icon: FileCheck, label: 'Solicitudes' });
     links.push({ to: '/admin/inbox', icon: Inbox, label: 'Buzón Usuarios' });
@@ -57,14 +66,23 @@ export const Layout: React.FC = () => {
     <div className="min-h-screen flex bg-[#020617] flex-col md:flex-row text-white">
       
       {user.isImpersonating && (
-        <div className="fixed top-0 left-0 right-0 h-8 bg-orange-900 z-50 flex items-center justify-center text-white text-xs font-bold uppercase tracking-wider shadow-md border-b border-orange-700">
-            <Eye size={14} className="mr-2" />
-            Modo Auditoría Activo: Estás visualizando la cuenta de {user.name} sin firma.
+        <div className="fixed top-0 left-0 right-0 h-10 bg-orange-700 z-[100] flex items-center justify-between px-6 text-white text-xs font-bold uppercase tracking-wider shadow-lg border-b border-orange-500 animate-in slide-in-from-top duration-300">
+            <div className="flex items-center">
+                <Eye size={16} className="mr-2" />
+                Modo Auditoría Activo: Estás visualizando la cuenta de {user.name} ({user.email}).
+            </div>
+            <button 
+                onClick={handleStopImpersonating}
+                className="flex items-center bg-white/20 hover:bg-white/30 px-3 py-1 rounded border border-white/30 transition-colors"
+            >
+                <XCircle size={14} className="mr-2" />
+                Finalizar Auditoría
+            </button>
         </div>
       )}
 
       {/* Sidebar Desktop */}
-      <aside className={`hidden md:flex w-64 bg-slate-950 text-white flex-col fixed h-full z-10 shadow-2xl border-r border-white/10 ${user.isImpersonating ? 'mt-8' : ''}`}>
+      <aside className={`hidden md:flex w-64 bg-slate-950 text-white flex-col fixed h-full z-10 shadow-2xl border-r border-white/10 ${user.isImpersonating ? 'mt-10' : ''}`}>
         <div className="p-6 border-b border-white/10">
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
             CODEX 
@@ -128,7 +146,7 @@ export const Layout: React.FC = () => {
       </aside>
 
       {/* Mobile Header */}
-      <div className={`md:hidden fixed w-full bg-slate-950 text-white z-20 flex justify-between items-center p-4 shadow-md border-b border-white/10 ${user.isImpersonating ? 'top-8' : 'top-0'}`}>
+      <div className={`md:hidden fixed w-full bg-slate-950 text-white z-20 flex justify-between items-center p-4 shadow-md border-b border-white/10 ${user.isImpersonating ? 'top-10' : 'top-0'}`}>
         <h1 className="font-black text-xl tracking-tight">CODEX</h1>
         <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="text-gray-300">
           {mobileMenuOpen ? <X /> : <Menu />}
@@ -137,7 +155,7 @@ export const Layout: React.FC = () => {
 
       {/* Mobile Menu Overlay */}
       {mobileMenuOpen && (
-        <div className={`md:hidden fixed inset-0 bg-slate-950 z-10 pt-20 px-6 space-y-4 ${user.isImpersonating ? 'mt-8' : ''}`}>
+        <div className={`md:hidden fixed inset-0 bg-slate-950 z-10 pt-20 px-6 space-y-4 ${user.isImpersonating ? 'mt-10' : ''}`}>
            {links.map(link => (
             <NavLink
               key={link.to}
@@ -160,7 +178,7 @@ export const Layout: React.FC = () => {
       )}
 
       {/* Main Content */}
-      <main className={`flex-1 md:ml-64 p-4 md:p-8 pt-20 md:pt-8 overflow-y-auto text-white ${user.isImpersonating ? 'mt-8' : ''}`}>
+      <main className={`flex-1 md:ml-64 p-4 md:p-8 pt-20 md:pt-8 overflow-y-auto text-white ${user.isImpersonating ? 'mt-10' : ''}`}>
         {/* Header Bar */}
         <header className="flex justify-between items-center mb-8">
           <div>
@@ -171,6 +189,7 @@ export const Layout: React.FC = () => {
                 location.pathname === '/proposals' ? 'Propuestas de Mejora' :
                 location.pathname === '/profile' ? 'Mi Perfil' :
                 location.pathname === '/admin' ? 'Administración' : 
+                location.pathname === '/admin/incidents' ? 'Centro de Control de Seguridad' :
                 location.pathname === '/admin/analytics' ? 'Analíticas de Uso' :
                 location.pathname === '/admin/requests' ? 'Solicitudes de Archivos' : 
                 location.pathname === '/admin/inbox' ? 'Buzón de Usuarios' : 

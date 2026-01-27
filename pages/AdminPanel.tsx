@@ -1,21 +1,31 @@
 
 import React, { useEffect, useState } from 'react';
-import { Shield, Users, Activity, RefreshCw, FileCheck, CheckCircle, Eye, Trash2, AlertTriangle, X, FileEdit, Radio, Clock, Network, Lock, Monitor, Laptop, Power } from 'lucide-react';
+import { 
+    Shield, Users, Activity, RefreshCw, FileCheck, CheckCircle, Eye, Trash2, 
+    AlertTriangle, X, FileEdit, Radio, Clock, Network, Lock, Monitor, Laptop, 
+    Power, UserSearch, ShieldEllipsis, Layers, Key, CheckSquare, Square, Save, Loader
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { appwriteService } from '../services/appwriteService';
+import { appwriteService, normalizeString } from '../services/appwriteService';
 import { User } from '../types';
 import { PrivacyCertificateModal } from '../components/PrivacyCertificateModal';
 import { Link } from 'react-router-dom';
 
 export const AdminPanel: React.FC = () => {
-  const { user, onlineUsers, forceLogoutUser } = useAuth();
+  const { user, onlineUsers, forceLogoutUser, impersonateUser } = useAuth();
   const [usersList, setUsersList] = useState<User[]>([]);
+  const [availableAreas, setAvailableAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [viewCertificateUser, setViewCertificateUser] = useState<User | null>(null);
   const [privacyPolicyText, setPrivacyPolicyText] = useState('');
   const [deleteConfirmationUser, setDeleteConfirmationUser] = useState<User | null>(null);
   
+  // Multi-Area Management State
+  const [areaManagerUser, setAreaManagerUser] = useState<User | null>(null);
+  const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
+  const [isSavingAreas, setIsSavingAreas] = useState(false);
+
   const [deviceToDelete, setDeviceToDelete] = useState<{userId: string, deviceId: string} | null>(null);
   const [userToDisconnect, setUserToDisconnect] = useState<{userId: string, name: string} | null>(null);
   
@@ -24,12 +34,14 @@ export const AdminPanel: React.FC = () => {
   
   const loadData = async () => {
     setLoading(true);
-    const [usersData, policyData] = await Promise.all([
+    const [usersData, policyData, areasData] = await Promise.all([
         appwriteService.adminGetAllUsers(),
-        appwriteService.getSystemConfig('privacy_policy')
+        appwriteService.getSystemConfig('privacy_policy'),
+        appwriteService.getAllAreas()
     ]);
     setUsersList(usersData);
     setPrivacyPolicyText(policyData || 'Texto de política no disponible.');
+    setAvailableAreas(areasData);
     setLoading(false);
   };
 
@@ -69,6 +81,33 @@ export const AdminPanel: React.FC = () => {
       setUserToDisconnect(null);
       setIsDeleting(false);
       setTimeout(() => setActionMessage(null), 4000);
+  };
+
+  const openAreaManager = (u: User) => {
+      setAreaManagerUser(u);
+      setSelectedAreas(u.allowedAreas.map(a => normalizeString(a)));
+  };
+
+  const toggleArea = (area: string) => {
+      const norm = normalizeString(area);
+      setSelectedAreas(prev => 
+        prev.includes(norm) ? prev.filter(a => a !== norm) : [...prev, norm]
+      );
+  };
+
+  const handleSaveAreas = async () => {
+      if (!areaManagerUser) return;
+      setIsSavingAreas(true);
+      const success = await appwriteService.adminUpdateUserAreas(areaManagerUser.$id, selectedAreas);
+      if (success) {
+          setActionMessage(`Autorizaciones actualizadas para ${areaManagerUser.name}.`);
+          await loadData();
+          setAreaManagerUser(null);
+          setTimeout(() => setActionMessage(null), 4000);
+      } else {
+          alert("Error al guardar cambios de área.");
+      }
+      setIsSavingAreas(false);
   };
 
   const signedUsers = usersList.filter(u => u.privacyAccepted);
@@ -218,7 +257,6 @@ export const AdminPanel: React.FC = () => {
                                             <Clock size={12} className="mr-1 opacity-50"/>
                                             {new Date(u.onlineAt).toLocaleTimeString()}
                                         </div>
-                                        {/* BOTÓN DE DESCONEXIÓN FORZADA */}
                                         <button 
                                             onClick={() => setUserToDisconnect({ userId: u.userId, name: u.name })}
                                             className="p-1.5 bg-red-900/20 text-red-500 rounded border border-red-500/30 hover:bg-red-600 hover:text-white transition-all shadow-sm"
@@ -256,9 +294,9 @@ export const AdminPanel: React.FC = () => {
                 <thead className="bg-slate-950 text-gray-400 font-medium border-b border-white/10">
                     <tr>
                         <th className="px-6 py-4">Nombre / Firma Legal</th>
-                        <th className="px-6 py-4">Área Asignada</th>
+                        <th className="px-6 py-4">Autorización de Acceso</th>
                         <th className="px-6 py-4">IDs de Hardware Autorizados</th>
-                        <th className="px-6 py-4 text-right">Red (Public IP)</th>
+                        <th className="px-6 py-4 text-right">Acciones</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -268,7 +306,7 @@ export const AdminPanel: React.FC = () => {
                         <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">No se encontraron usuarios.</td></tr>
                     ) : (
                         usersList.map((u) => (
-                            <tr key={u.$id} className="hover:bg-white/5 transition-colors">
+                            <tr key={u.$id} className="hover:bg-white/5 transition-colors group/row">
                                 <td className="px-6 py-4">
                                     <div className="font-semibold text-white uppercase text-xs mb-0.5">
                                         {u.signedName || u.name}
@@ -276,9 +314,23 @@ export const AdminPanel: React.FC = () => {
                                     <div className="text-[10px] text-gray-500 font-mono">{u.email}</div>
                                 </td>
                                 <td className="px-6 py-4">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-900/30 text-indigo-300 border border-indigo-500/30">
-                                        {u.area}
-                                    </span>
+                                    <div className="flex flex-wrap gap-1.5 items-center">
+                                        {u.allowedAreas.slice(0, 2).map((area, idx) => (
+                                            <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black bg-indigo-900/30 text-indigo-300 border border-indigo-500/20 uppercase tracking-tighter">
+                                                {area}
+                                            </span>
+                                        ))}
+                                        {u.allowedAreas.length > 2 && (
+                                            <span className="text-[9px] font-bold text-gray-500">+{u.allowedAreas.length - 2} más</span>
+                                        )}
+                                        <button 
+                                            onClick={() => openAreaManager(u)}
+                                            className="ml-1 p-1 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded transition-colors"
+                                            title="Gestionar áreas autorizadas"
+                                        >
+                                            <ShieldEllipsis size={14} />
+                                        </button>
+                                    </div>
                                 </td>
                                 <td className="px-6 py-4">
                                     <div className={`flex flex-col py-1 ${u.authorizedDevices && u.authorizedDevices.length > 1 ? 'gap-4 mb-2' : 'gap-1.5'}`}>
@@ -307,9 +359,18 @@ export const AdminPanel: React.FC = () => {
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                    <span className="inline-flex items-center px-2 py-1 rounded border border-white/10 bg-slate-950 text-[10px] font-mono text-gray-500">
-                                        {u.lastIp || 'N/A'}
-                                    </span>
+                                    <div className="flex items-center justify-end space-x-2">
+                                        <button 
+                                            onClick={() => impersonateUser(u)}
+                                            className="p-2 bg-indigo-900/20 text-indigo-400 rounded-lg hover:bg-indigo-600 hover:text-white transition-all shadow-sm opacity-0 group-hover/row:opacity-100 border border-indigo-500/20"
+                                            title="Modo Auditoría (Ingresar como este usuario)"
+                                        >
+                                            <UserSearch size={16} />
+                                        </button>
+                                        <span className="inline-flex items-center px-2 py-1 rounded border border-white/10 bg-slate-950 text-[10px] font-mono text-gray-500">
+                                            {u.lastIp || 'N/A'}
+                                        </span>
+                                    </div>
                                 </td>
                             </tr>
                         ))
@@ -379,6 +440,88 @@ export const AdminPanel: React.FC = () => {
          </div>
       </div>
 
+      {/* MODAL DE GESTIÓN MULTI-ÁREA */}
+      {areaManagerUser && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full flex flex-col max-h-[85vh] border border-indigo-500/30 overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-6 bg-slate-950 border-b border-white/10 flex justify-between items-center">
+                    <div className="flex items-center">
+                        <div className="p-2 bg-indigo-900/30 rounded-lg mr-3 text-indigo-400">
+                            <Layers size={20} />
+                        </div>
+                        <div>
+                            <h3 className="font-black text-white uppercase tracking-tight text-sm">Autorización Multi-Área</h3>
+                            <p className="text-[10px] text-indigo-400 font-bold uppercase">{areaManagerUser.name}</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setAreaManagerUser(null)} className="text-gray-500 hover:text-white transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div className="p-4 bg-indigo-950/20 border-b border-white/5 flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                        {selectedAreas.length} Áreas Seleccionadas
+                    </span>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => setSelectedAreas(availableAreas.map(a => normalizeString(a)))}
+                            className="text-[9px] font-black text-indigo-400 hover:text-white uppercase"
+                        >
+                            Seleccionar Todo
+                        </button>
+                        <span className="text-gray-700">|</span>
+                        <button 
+                            onClick={() => setSelectedAreas([])}
+                            className="text-[9px] font-black text-gray-500 hover:text-white uppercase"
+                        >
+                            Limpiar
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950/30">
+                    {availableAreas.map((area, idx) => {
+                        const isSelected = selectedAreas.includes(normalizeString(area));
+                        return (
+                            <button 
+                                key={idx}
+                                onClick={() => toggleArea(area)}
+                                className={`flex items-center p-3 rounded-xl border transition-all text-left group ${
+                                    isSelected 
+                                    ? 'bg-indigo-900/20 border-indigo-500/40 text-white' 
+                                    : 'bg-slate-900/50 border-white/5 text-gray-500 hover:border-white/20'
+                                }`}
+                            >
+                                <div className={`mr-3 transition-colors ${isSelected ? 'text-indigo-400' : 'text-gray-700 group-hover:text-gray-400'}`}>
+                                    {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                                </div>
+                                <span className="text-[10px] font-black uppercase tracking-tighter truncate">{area}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="p-6 bg-slate-950 border-t border-white/10 flex gap-3">
+                    <button 
+                        onClick={() => setAreaManagerUser(null)}
+                        className="flex-1 py-3 bg-slate-800 text-gray-400 font-bold rounded-xl text-xs uppercase hover:bg-slate-700 transition-colors"
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        onClick={handleSaveAreas}
+                        disabled={isSavingAreas}
+                        className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs uppercase shadow-lg shadow-indigo-950/40 flex items-center justify-center transition-all"
+                    >
+                        {isSavingAreas ? <Loader className="animate-spin mr-2" size={16}/> : <Save className="mr-2" size={16}/>}
+                        {isSavingAreas ? 'Guardando...' : 'Guardar Accesos'}
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {viewCertificateUser && (
         <PrivacyCertificateModal 
             user={viewCertificateUser}
@@ -387,7 +530,7 @@ export const AdminPanel: React.FC = () => {
         />
       )}
 
-      {/* MODAL DE ADVERTENCIA: Revocar Firma Legal */}
+      {/* MODALES DE ADVERTENCIA EXISTENTES... */}
       {deleteConfirmationUser && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 rounded-xl shadow-2xl max-w-sm w-full p-6 relative animate-in fade-in zoom-in duration-200 border border-white/10">
@@ -397,131 +540,46 @@ export const AdminPanel: React.FC = () => {
                 >
                     <X size={20} />
                 </button>
-                
                 <div className="flex justify-center mb-4">
                     <div className="bg-red-900/30 p-3 rounded-full text-red-500 border border-red-500/30">
                         <AlertTriangle size={32} />
                     </div>
                 </div>
-                
-                <h3 className="text-lg font-bold text-center text-white mb-2">
-                    ¿Revocar Acceso Legal?
-                </h3>
-                
-                <p className="text-sm text-gray-400 text-center mb-6">
-                    Estás a punto de invalidar la firma de privacidad de <strong>{deleteConfirmationUser.name}</strong>. 
-                    El usuario será bloqueado.
-                </p>
-                
+                <h3 className="text-lg font-bold text-center text-white mb-2">¿Revocar Acceso Legal?</h3>
+                <p className="text-sm text-gray-400 text-center mb-6">Estás a punto de invalidar la firma de privacidad de <strong>{deleteConfirmationUser.name}</strong>.</p>
                 <div className="flex space-x-3">
-                    <button 
-                        onClick={() => setDeleteConfirmationUser(null)}
-                        className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5 transition-colors"
-                        disabled={isDeleting}
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={handleDeleteSignature}
-                        disabled={isDeleting}
-                        className="flex-1 py-2.5 bg-red-600 rounded-lg text-white font-bold hover:bg-red-700 transition-colors shadow-sm disabled:opacity-50"
-                    >
-                        {isDeleting ? 'Procesando...' : 'Sí, Revocar'}
-                    </button>
+                    <button onClick={() => setDeleteConfirmationUser(null)} className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5" disabled={isDeleting}>Cancelar</button>
+                    <button onClick={handleDeleteSignature} disabled={isDeleting} className="flex-1 py-2.5 bg-red-600 rounded-lg text-white font-bold hover:bg-red-700 disabled:opacity-50">{isDeleting ? 'Procesando...' : 'Sí, Revocar'}</button>
                 </div>
             </div>
         </div>
       )}
-
-      {/* MODAL DE ADVERTENCIA: Eliminar ID de Hardware */}
+      
       {deviceToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 rounded-xl shadow-2xl max-w-sm w-full p-6 relative animate-in fade-in zoom-in duration-200 border border-red-500/20">
-                <button 
-                    onClick={() => setDeviceToDelete(null)} 
-                    className="absolute top-4 right-4 text-gray-500 hover:text-white"
-                >
-                    <X size={20} />
-                </button>
-                
-                <div className="flex justify-center mb-4">
-                    <div className="bg-red-900/20 p-3 rounded-full text-red-500 border border-red-500/30">
-                        <Trash2 size={32} />
-                    </div>
-                </div>
-                
-                <h3 className="text-lg font-bold text-center text-white mb-2 uppercase tracking-tight">
-                    ¿Eliminar ID de Hardware?
-                </h3>
-                
-                <p className="text-sm text-gray-400 text-center mb-6">
-                    ¿Estás seguro de que deseas eliminar el identificador <span className="text-red-400 font-mono font-bold">{deviceToDelete.deviceId}</span>? 
-                    <br/><br/>
-                    El usuario perderá el acceso desde esta terminal y se liberará un espacio de su cupo.
-                </p>
-                
+                <button onClick={() => setDeviceToDelete(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20} /></button>
+                <div className="flex justify-center mb-4"><div className="bg-red-900/20 p-3 rounded-full text-red-500 border border-red-500/30"><Trash2 size={32} /></div></div>
+                <h3 className="text-lg font-bold text-center text-white mb-2 uppercase tracking-tight">¿Eliminar ID de Hardware?</h3>
+                <p className="text-sm text-gray-400 text-center mb-6">¿Estás seguro de que deseas eliminar el identificador <span className="text-red-400 font-mono font-bold">{deviceToDelete.deviceId}</span>?</p>
                 <div className="flex space-x-3">
-                    <button 
-                        onClick={() => setDeviceToDelete(null)}
-                        className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5 transition-colors uppercase text-xs font-bold"
-                        disabled={isDeleting}
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={handleExecuteDeviceRemoval}
-                        disabled={isDeleting}
-                        className="flex-1 py-2.5 bg-red-600 rounded-lg text-white font-black hover:bg-red-700 transition-all shadow-lg shadow-red-900/40 uppercase text-xs"
-                    >
-                        {isDeleting ? 'Borrando...' : 'SÍ, ELIMINAR ID'}
-                    </button>
+                    <button onClick={() => setDeviceToDelete(null)} className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5 uppercase text-xs font-bold" disabled={isDeleting}>Cancelar</button>
+                    <button onClick={handleExecuteDeviceRemoval} disabled={isDeleting} className="flex-1 py-2.5 bg-red-600 rounded-lg text-white font-black hover:bg-red-700 transition-all shadow-lg shadow-red-900/40 uppercase text-xs">{isDeleting ? 'Borrando...' : 'SÍ, ELIMINAR ID'}</button>
                 </div>
             </div>
         </div>
       )}
 
-      {/* MODAL DE ADVERTENCIA: Desconexión Forzada */}
       {userToDisconnect && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 rounded-xl shadow-2xl max-w-sm w-full p-6 relative animate-in fade-in zoom-in duration-200 border border-amber-500/20">
-                <button 
-                    onClick={() => setUserToDisconnect(null)} 
-                    className="absolute top-4 right-4 text-gray-500 hover:text-white"
-                >
-                    <X size={20} />
-                </button>
-                
-                <div className="flex justify-center mb-4">
-                    <div className="bg-amber-900/20 p-3 rounded-full text-amber-500 border border-amber-500/30">
-                        <Power size={32} />
-                    </div>
-                </div>
-                
-                <h3 className="text-lg font-bold text-center text-white mb-2 uppercase tracking-tight">
-                    ¿Interrumpir Sesión?
-                </h3>
-                
-                <p className="text-sm text-gray-400 text-center mb-6">
-                    Estás a punto de cerrar forzosamente la sesión activa de <span className="text-amber-400 font-bold">{userToDisconnect.name}</span>. 
-                    <br/><br/>
-                    El usuario será redirigido al login inmediatamente.
-                </p>
-                
+                <button onClick={() => setUserToDisconnect(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20} /></button>
+                <div className="flex justify-center mb-4"><div className="bg-amber-900/20 p-3 rounded-full text-amber-500 border border-amber-500/30"><Power size={32} /></div></div>
+                <h3 className="text-lg font-bold text-center text-white mb-2 uppercase tracking-tight">¿Interrumpir Sesión?</h3>
+                <p className="text-sm text-gray-400 text-center mb-6">Estás a punto de cerrar forzosamente la sesión activa de <span className="text-amber-400 font-bold">{userToDisconnect.name}</span>.</p>
                 <div className="flex space-x-3">
-                    <button 
-                        onClick={() => setUserToDisconnect(null)}
-                        className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5 transition-colors uppercase text-xs font-bold"
-                        disabled={isDeleting}
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={handleExecuteForceLogout}
-                        disabled={isDeleting}
-                        className="flex-1 py-2.5 bg-amber-600 rounded-lg text-white font-black hover:bg-amber-700 transition-all shadow-lg shadow-amber-900/40 uppercase text-xs"
-                    >
-                        {isDeleting ? 'Finalizando...' : 'SÍ, CERRAR SESIÓN'}
-                    </button>
+                    <button onClick={() => setUserToDisconnect(null)} className="flex-1 py-2.5 border border-white/20 rounded-lg text-gray-300 font-medium hover:bg-white/5 uppercase text-xs font-bold" disabled={isDeleting}>Cancelar</button>
+                    <button onClick={handleExecuteForceLogout} disabled={isDeleting} className="flex-1 py-2.5 bg-amber-600 rounded-lg text-white font-black hover:bg-amber-700 transition-all shadow-lg shadow-amber-900/40 uppercase text-xs">{isDeleting ? 'Finalizando...' : 'SÍ, CERRAR SESIÓN'}</button>
                 </div>
             </div>
         </div>

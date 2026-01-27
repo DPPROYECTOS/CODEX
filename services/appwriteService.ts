@@ -1,5 +1,5 @@
 
-import { Area, Procedure, User, Status, ADMIN_EMAILS, Department, OnlineUser, ConsultationMessage, ConsultationReply, Folder, DownloadRequest, AccessLog, ImprovementProposal } from '../types';
+import { Area, Procedure, User, Status, ADMIN_EMAILS, MASTER_VIEWER_EMAILS, ADMIN_HARDWARE_IDS, Department, OnlineUser, ConsultationMessage, ConsultationReply, Folder, DownloadRequest, AccessLog, ImprovementProposal, SecurityIncident } from '../types';
 import { MOCK_USERS, MOCK_PROCEDURES } from './mockData';
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
@@ -39,6 +39,7 @@ if (isMasterReady()) {
 
 const STORAGE_KEY_USER = 'codex_mock_user';
 const STORAGE_KEY_DEVICE_ID = 'codex_device_unique_token';
+const STORAGE_KEY_MASTER_SEAL = 'codex_terminal_master_seal'; 
 
 export const normalizeString = (str: string) => {
     return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : "";
@@ -49,22 +50,38 @@ export const appwriteService = {
   getDeviceId(): string {
     let deviceId = localStorage.getItem(STORAGE_KEY_DEVICE_ID);
     if (!deviceId) {
-        deviceId = `DEV-${Math.random().toString(36).substring(2, 11).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+        // Generación de Huella Digital (Fingerprint) más estable
+        const screenSpecs = `${window.screen.width}x${window.screen.height}`;
+        const cpuCores = navigator.hardwareConcurrency || 4;
+        const platform = navigator.platform || 'unknown';
+        const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+        
+        // Formato estable: HW-SPEC-CORES-RANDOM
+        deviceId = `HW-${screenSpecs}-${cpuCores}-${randomPart}`;
         localStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
     }
     return deviceId;
   },
 
-  async checkConnection(): Promise<string> {
-    if (!isLegacyReady() || !supabase) return "OK"; 
+  async isThisAdminHardware(): Promise<boolean> {
+    const hasMasterSeal = localStorage.getItem(STORAGE_KEY_MASTER_SEAL) === 'SECURE_MASTER_AUTHORIZED';
+    if (hasMasterSeal) return true;
+    const currentDeviceId = this.getDeviceId();
+    if (ADMIN_HARDWARE_IDS.includes(currentDeviceId)) return true;
+    if (!isLegacyReady() || !supabase) return false;
     try {
-        const { error: authError } = await supabase.auth.getSession();
-        if (authError) throw authError;
-        return "OK";
-    } catch (e: any) {
-        console.error("Supabase Ping Error", e);
-        return "BLOCKED";
-    }
+        const { data: owners } = await supabase
+            .from('user_authorized_ips')
+            .select('user_id')
+            .eq('ip_address', currentDeviceId);
+        if (!owners || owners.length === 0) return false;
+        const ownerIds = owners.map(o => o.user_id);
+        const { data: adminCheck } = await supabase
+            .from('users')
+            .select('email')
+            .in('id', ownerIds);
+        return adminCheck?.some(u => ADMIN_EMAILS.includes(u.email.toLowerCase())) || false;
+    } catch (e) { return false; }
   },
 
   async login(email: string, password?: string): Promise<User> {
@@ -77,127 +94,97 @@ export const appwriteService = {
 
     if (isLegacyReady() && supabase) {
       try {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
-            password
-        });
-
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw new Error(authError.message);
         if (!authData.user) throw new Error("No se pudo obtener el usuario.");
 
-        const isAdminByEmail = ADMIN_EMAILS.includes(email.toLowerCase());
         const currentDeviceId = this.getDeviceId(); 
+        const normalizedEmail = email.toLowerCase();
+        const isAdminByEmail = ADMIN_EMAILS.includes(normalizedEmail);
+        const isMasterViewer = MASTER_VIEWER_EMAILS.includes(normalizedEmail);
+        const isAdminHardware = await this.isThisAdminHardware();
 
-        let { data: profileData } = await supabase
-            .from('users') 
-            .select('*')
-            .eq('id', authData.user.id) 
-            .maybeSingle();
+        if (isAdminByEmail) {
+            localStorage.setItem(STORAGE_KEY_MASTER_SEAL, 'SECURE_MASTER_AUTHORIZED');
+        }
 
+        let { data: profileData } = await supabase.from('users').select('*').eq('id', authData.user.id).maybeSingle();
         if (!profileData) {
             await supabase.auth.signOut();
             throw new Error("ACCESO DENEGADO: Su cuenta no está autorizada en CODEX.");
         }
 
-        // Obtener IP actual para validación de hardware
+        const isAdminByRole = profileData.role === 'admin';
+        const isFullAdmin = isAdminByEmail || isAdminByRole;
+        const hasGlobalVisibility = isFullAdmin || isMasterViewer;
+
+        // --- SISTEMA DE REGISTRO DE HARDWARE (AHORA INCLUYE ADMINS PARA TRAZABILIDAD) ---
+        const { data: authorizedDevicesData } = await supabase.from('user_authorized_ips').select('ip_address').eq('user_id', authData.user.id);
+        let authorizedIds = (authorizedDevicesData || []).map((i: any) => i.ip_address);
+
+        if (!authorizedIds.includes(currentDeviceId)) {
+            const maxAllowed = profileData.max_devices || (isFullAdmin ? 10 : 3);
+            if (authorizedIds.length >= maxAllowed) {
+                await supabase.auth.signOut();
+                throw new Error(`DISPOSITIVO NO AUTORIZADO: Límite de ${maxAllowed} equipos alcanzado.`);
+            } else {
+                await supabase.from('user_authorized_ips').insert({
+                    user_id: authData.user.id,
+                    ip_address: currentDeviceId,
+                    device_name: isFullAdmin ? `Terminal Admin ${authorizedIds.length + 1}` : `Terminal ${authorizedIds.length + 1}`
+                });
+                authorizedIds.push(currentDeviceId);
+            }
+        }
+
+        // Actualizar metadatos de conexión
         let currentIp = '';
         try {
             const ipRes = await fetch('https://api.ipify.org?format=json');
             const ipData = await ipRes.json();
             currentIp = ipData.ip;
         } catch (e) {}
-
-        // VALIDACIÓN DE HARDWARE (DEDUPLICACIÓN INTELIGENTE)
-        const { data: authorizedDevices } = await supabase
-            .from('user_authorized_ips')
-            .select('ip_address') 
-            .eq('user_id', authData.user.id);
-
-        const authorizedIds = (authorizedDevices || []).map((i: any) => i.ip_address);
         
-        if (!authorizedIds.includes(currentDeviceId)) {
-            // LÓGICA DE UN SOLO DISPOSITIVO POR PC: 
-            if (currentIp && profileData.last_ip === currentIp && profileData.last_device_id) {
-                await supabase.from('user_authorized_ips')
-                    .update({ ip_address: currentDeviceId })
-                    .eq('user_id', authData.user.id)
-                    .eq('ip_address', profileData.last_device_id);
-            } else {
-                const maxAllowed = profileData.max_devices || (isAdminByEmail ? 5 : 3);
-                if (authorizedIds.length >= maxAllowed) {
-                    await supabase.auth.signOut();
-                    throw new Error(`DISPOSITIVO NO AUTORIZADO: Has alcanzado tu límite de ${maxAllowed} equipos permitidos.`);
-                } else {
-                    await supabase.from('user_authorized_ips').insert({
-                        user_id: authData.user.id,
-                        ip_address: currentDeviceId,
-                        device_name: isAdminByEmail ? `Admin Node ${authorizedIds.length + 1}` : `Terminal ${authorizedIds.length + 1}`
-                    });
-                }
-            }
-        }
-
-        // Sincronización de Perfil
-        try {
-            await supabase.from('users')
-                .update({ 
-                    last_ip: currentIp || profileData?.last_ip,
-                    last_device_id: currentDeviceId 
-                })
-                .eq('id', authData.user.id);
-        } catch (e) { }
+        await supabase.from('users').update({ 
+            last_ip: currentIp || profileData?.last_ip, 
+            last_device_id: currentDeviceId 
+        }).eq('id', authData.user.id);
 
         let allowedAreas: string[] = [];
-        const { data: accessData } = await supabase
-            .from('user_area_access')
-            .select('area_name')
-            .eq('user_id', authData.user.id);
-        
+        const { data: accessData } = await supabase.from('user_area_access').select('area_name').eq('user_id', authData.user.id);
         if (accessData && accessData.length > 0) {
             allowedAreas = Array.from(new Set(accessData.map((a: any) => (a.area_name || '').toUpperCase())));
         }
-
         const primaryArea = ((profileData?.area as string) || Area.IT).toUpperCase();
         if (allowedAreas.length === 0) allowedAreas = [primaryArea];
 
-        if (isAdminByEmail) {
+        if (hasGlobalVisibility) {
             const { data: allDepts } = await supabase.from('departments').select('name').order('name');
             if (allDepts) allowedAreas = Array.from(new Set(allDepts.map((d: any) => (d.name || '').toUpperCase())));
         }
 
-        const { data: signatureData } = await supabase
-            .from('privacy_signatures')
-            .select('*')
-            .eq('user_id', authData.user.id)
-            .maybeSingle();
+        const { data: signatureData } = await supabase.from('privacy_signatures').select('*').eq('user_id', authData.user.id).maybeSingle();
 
         return {
             $id: profileData?.id || authData.user.id,
             name: profileData?.name || email.split('@')[0],
-            email: profileData?.email || email,
+            email: email,
             area: primaryArea,
             allowedAreas: allowedAreas,
-            role: isAdminByEmail ? 'admin' : (profileData?.role || 'viewer'),
+            role: isFullAdmin ? 'admin' : (profileData?.role || 'viewer'),
             privacyAccepted: !!signatureData,
             signedName: signatureData?.signed_name,
             signedDepartment: signatureData?.signed_department,
             lastIp: currentIp || profileData?.last_ip,
             lastDeviceId: currentDeviceId, 
+            authorizedDevices: authorizedIds,
             avatarUrl: profileData?.avatar_url,
-            maxDevices: profileData?.max_devices || (isAdminByEmail ? 5 : 3)
+            maxDevices: profileData?.max_devices || (isFullAdmin ? 10 : 3),
+            isAdminHardware: isAdminHardware || isFullAdmin
         };
-      } catch (error: any) {
-        throw error;
-      }
+      } catch (error: any) { throw error; }
     }
-    throw new Error("Falta configurar SUPABASE.");
-  },
-
-  async logout(): Promise<void> {
-    if (isLegacyReady() && supabase) {
-      await supabase.auth.signOut();
-    } 
-    localStorage.removeItem(STORAGE_KEY_USER);
+    throw new Error("Error de conexión.");
   },
 
   async getCurrentUser(): Promise<User | null> {
@@ -209,12 +196,17 @@ export const appwriteService = {
         if (!profile) return null;
         
         const currentLocalDeviceId = this.getDeviceId();
+        const normalizedEmail = (user.email || '').toLowerCase();
+        const isAdminHardware = await this.isThisAdminHardware();
+        const isAdminByEmail = ADMIN_EMAILS.includes(normalizedEmail);
+        const isMasterViewer = MASTER_VIEWER_EMAILS.includes(normalizedEmail);
+        const isAdminByRole = profile.role === 'admin';
+        
+        const isFullAdmin = isAdminByEmail || isAdminByRole;
+        const hasGlobalVisibility = isFullAdmin || isMasterViewer;
 
-        if (!profile.last_device_id || profile.last_device_id !== currentLocalDeviceId) {
-             await supabase.from('users')
-                .update({ last_device_id: currentLocalDeviceId })
-                .eq('id', user.id);
-        }
+        const { data: authorizedDevicesData } = await supabase.from('user_authorized_ips').select('ip_address').eq('user_id', user.id);
+        const authorizedIds = (authorizedDevicesData || []).map((i: any) => i.ip_address);
 
         let allowedAreas: string[] = [];
         const { data: accessData } = await supabase.from('user_area_access').select('area_name').eq('user_id', user.id);
@@ -222,7 +214,11 @@ export const appwriteService = {
         const primaryArea = ((profile?.area as string) || Area.IT).toUpperCase();
         if (allowedAreas.length === 0) allowedAreas = [primaryArea];
 
-        const isAdmin = ADMIN_EMAILS.includes((user.email || '').toLowerCase());
+        if (hasGlobalVisibility) {
+            const { data: allDepts } = await supabase.from('departments').select('name').order('name');
+            if (allDepts) allowedAreas = Array.from(new Set(allDepts.map((d: any) => (d.name || '').toUpperCase())));
+        }
+
         const { data: signatureData } = await supabase.from('privacy_signatures').select('*').eq('user_id', user.id).maybeSingle();
 
         return {
@@ -231,25 +227,39 @@ export const appwriteService = {
             email: user.email || '',
             area: primaryArea,
             allowedAreas: allowedAreas,
-            role: isAdmin ? 'admin' : (profile?.role || 'viewer'),
+            role: isFullAdmin ? 'admin' : (profile?.role || 'viewer'),
             privacyAccepted: !!signatureData,
             signedName: signatureData?.signed_name,
             signedDepartment: signatureData?.signed_department,
             lastIp: profile?.last_ip,
             lastDeviceId: currentLocalDeviceId, 
+            authorizedDevices: authorizedIds,
             avatarUrl: profile?.avatar_url,
-            maxDevices: profile?.max_devices || (isAdmin ? 5 : 3)
+            maxDevices: profile?.max_devices || (isFullAdmin ? 10 : 3),
+            isAdminHardware: isAdminHardware || isFullAdmin
         };
       } catch (e) { return null; }
     }
     return null;
   },
 
+  async logout(): Promise<void> {
+    if (isLegacyReady() && supabase) {
+      await supabase.auth.signOut();
+    }
+    localStorage.removeItem(STORAGE_KEY_USER);
+    localStorage.removeItem(STORAGE_KEY_MASTER_SEAL);
+  },
+
   subscribeToPresence(user: User, onSync: (users: OnlineUser[]) => void, onForceLogout?: (targetId: string) => void): RealtimeChannel | null {
     if (!isLegacyReady() || !supabase) return null;
     try {
+        const deviceId = this.getDeviceId();
+        // CLAVE ÚNICA POR DISPOSITIVO: Esto evita que una sesión pise a otra en el monitor
+        const presenceKey = `${user.$id}:${deviceId}`;
+
         const channel = supabase.channel('codex_global_presence', {
-            config: { presence: { key: user.$id } },
+            config: { presence: { key: presenceKey } },
         });
 
         channel
@@ -275,10 +285,10 @@ export const appwriteService = {
                 onSync(users);
             });
 
-        // Registrar listener de broadcast ANTES de suscribirse para evitar perder eventos
         if (onForceLogout) {
             channel.on('broadcast', { event: 'force_logout' }, (payload: any) => {
-                if (payload.payload?.userId) {
+                // Si el broadcast es para este usuario específico o global
+                if (payload.payload?.userId === user.$id) {
                     onForceLogout(payload.payload.userId);
                 }
             });
@@ -286,8 +296,6 @@ export const appwriteService = {
 
         channel.subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
-                const freshIp = this.getDeviceId(); 
-
                 await channel.track({
                     userId: user.$id,
                     name: user.name,
@@ -295,7 +303,7 @@ export const appwriteService = {
                     area: user.area,
                     role: user.role,
                     onlineAt: new Date().toISOString(),
-                    ip: freshIp 
+                    ip: deviceId // Usamos el ID de Hardware en lugar de la IP real en este campo para el monitor
                 });
             }
         });
@@ -424,22 +432,39 @@ export const appwriteService = {
   },
 
   async getFolders(area?: string): Promise<Folder[]> {
+    const folders: Folder[] = [];
+    const queries = [];
     if (isMasterReady() && supabaseMaster) {
-      try {
-        let query = supabaseMaster.from('published_folders').select('*').order('folder_name');
-        if (area) query = query.ilike('area', area); 
-        const { data, error } = await query;
-        if (error) throw error;
-        return data.map((f: any) => ({
-          id: f.origin_folder_id || f.id, 
-          name: f.folder_name || f.name,  
-          parent_id: null, 
-          created_at: new Date().toISOString(),
-          area: (f.area || '').toUpperCase()
-        }));
-      } catch (e) { return []; }
+        queries.push(supabaseMaster.from('folders').select('*'));
+        queries.push(supabaseMaster.from('published_folders').select('*'));
     }
-    return [];
+    if (isLegacyReady() && supabase) {
+        queries.push(supabase.from('folders').select('*'));
+    }
+
+    try {
+        const results = await Promise.all(queries);
+        const rawFolders: any[] = [];
+        results.forEach(res => { if (res.data) rawFolders.push(...res.data); });
+        const seenIds = new Set();
+        rawFolders.forEach(f => {
+            const id = f.origin_folder_id || f.id;
+            if (id && !seenIds.has(id)) {
+                const folderArea = (f.area || '').toUpperCase();
+                if (!area || folderArea === area.toUpperCase()) {
+                    seenIds.add(id);
+                    folders.push({
+                        id,
+                        name: (f.folder_name || f.name || 'Sin Nombre').toUpperCase(),
+                        parent_id: null,
+                        created_at: f.created_at || new Date().toISOString(),
+                        area: folderArea
+                    });
+                }
+            }
+        });
+        return folders.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) { return []; }
   },
 
   async getProcedures(user: User, queryText: string = '', areaFilter?: string): Promise<Procedure[]> {
@@ -448,19 +473,15 @@ export const appwriteService = {
         let masterQuery = supabaseMaster ? supabaseMaster.from('procedures').select('*') : null;
         if (masterQuery && areaFilter) masterQuery = masterQuery.ilike('area', areaFilter);
         const masterPromise = masterQuery || Promise.resolve({ data: [], error: null });
-
         let legacyQuery = supabase.from('procedures').select('*');
         if (areaFilter) legacyQuery = legacyQuery.ilike('area', areaFilter);
         const legacyPromise = legacyQuery;
-        
         const [masterRes, legacyRes] = await Promise.all([masterPromise, legacyPromise]);
         let rawData = [...(masterRes.data || []), ...(legacyRes.data || [])];
-
         if (queryText) {
             const q = queryText.toLowerCase();
             rawData = rawData.filter((d: any) => (d.title || d.name || '').toLowerCase().includes(q) || (d.code || '').toLowerCase().includes(q));
         }
-
         const mapped = rawData.map((doc: any) => ({
             $id: doc.id.toString(),
             name: doc.title || doc.name,
@@ -477,7 +498,6 @@ export const appwriteService = {
             responsible: doc.responsible || 'UAD',
             history: doc.history ? (typeof doc.history === 'string' ? JSON.parse(doc.history) : doc.history) : []
         }));
-
         if (user.role !== 'admin' && !areaFilter && !queryText) {
              return mapped.filter((d: any) => user.allowedAreas.some(allowed => normalizeString(allowed) === normalizeString(d.area)));
         }
@@ -531,22 +551,90 @@ export const appwriteService = {
     return false;
   },
 
-  async getStats(allowedAreas: string[]) {
+  async getStats(allowedAreas: string[], isAdmin: boolean = false) {
     if (isLegacyReady() && supabase) {
        try {
-           const masterPromise = supabaseMaster ? supabaseMaster.from('procedures').select('status, updated_at, area') : Promise.resolve({ data: [] });
-           const legacyPromise = supabase.from('procedures').select('status, updated_at, area');
+           const masterPromise = supabaseMaster ? supabaseMaster.from('procedures').select('*') : Promise.resolve({ data: [] });
+           const legacyPromise = supabase.from('procedures').select('*');
            const [m, l] = await Promise.all([masterPromise, legacyPromise]);
            const all = [...(m.data || []), ...(l.data || [])];
-           const normalized = allowedAreas.map(a => normalizeString(a));
-           const filtered = all.filter((p: any) => normalized.includes(normalizeString(p.area)));
-           const active = filtered.filter((p: any) => p.status === Status.ACTIVE || p.status === 'Vigente').length;
-           const review = filtered.filter((p: any) => p.status === Status.REVIEW || p.status === 'En Revisión').length;
-           filtered.sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-           return { totalActive: active, totalReview: review, lastUpdated: filtered[0]?.updated_at };
-       } catch (e) {}
+           
+           const normalizedAllowed = allowedAreas.map(a => normalizeString(a));
+           const filtered = all.filter((p: any) => normalizedAllowed.includes(normalizeString(p.area || p.departamento)));
+           
+           const active = filtered.filter((p: any) => {
+               const st = normalizeString(p.status || '');
+               return st === 'VIGENTE' || st === 'ACTIVE';
+           }).length;
+           
+           const review = filtered.filter((p: any) => {
+               const st = normalizeString(p.status || '');
+               return st === 'EN REVISION' || st === 'REVIEW';
+           }).length;
+
+           const obsolete = filtered.filter((p: any) => {
+               const st = normalizeString(p.status || '');
+               return st === 'OBSOLETO' || st === 'CADUCO' || st === 'HISTORICO';
+           }).length;
+
+           filtered.sort((a: any, b: any) => {
+               const dateA = new Date(a.updated_at || a.updatedAt || 0).getTime();
+               const dateB = new Date(b.updated_at || b.updatedAt || 0).getTime();
+               return dateB - dateA;
+           });
+
+           return { 
+               totalActive: active, 
+               totalReview: review, 
+               totalObsolete: obsolete,
+               lastUpdated: filtered[0]?.updated_at || filtered[0]?.updatedAt || null 
+           };
+       } catch (e) { }
     }
-    return { totalActive: 0, totalReview: 0, lastUpdated: null };
+    return { totalActive: 0, totalReview: 0, totalObsolete: 0, lastUpdated: null };
+  },
+
+  async logSecurityIncident(incident: Partial<SecurityIncident>): Promise<void> {
+    if (isLegacyReady() && supabase) {
+        try {
+            await supabase.from('security_incidents').insert({
+                user_id: incident.user_id,
+                user_name: incident.user_name,
+                user_email: incident.user_email,
+                user_area: incident.user_area,
+                procedure_id: incident.procedure_id,
+                procedure_name: incident.procedure_name,
+                device_id: incident.device_id,
+                incident_type: incident.incident_type || 'FOCUS_LOST_ATTEMPT',
+                details: incident.details || 'Incidencia de seguridad no descrita.',
+                severity: incident.severity || 'CRITICAL'
+            });
+        } catch (e) { console.error("Error logging security incident:", e); }
+    }
+  },
+
+  async adminGetSecurityIncidents(): Promise<SecurityIncident[]> {
+      if (isLegacyReady() && supabase) {
+          try {
+              const { data, error } = await supabase
+                .from('security_incidents')
+                .select('*')
+                .order('created_at', { ascending: false });
+              if (error) throw error;
+              return (data || []) as SecurityIncident[];
+          } catch (e) { return []; }
+      }
+      return [];
+  },
+
+  async adminDeleteAllIncidents(): Promise<boolean> {
+      if (isLegacyReady() && supabase) {
+          try {
+            const { error } = await supabase.from('security_incidents').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            return !error;
+          } catch(e) { return false; }
+      }
+      return false;
   },
 
   async getSystemConfig(key: string): Promise<string | null> {
@@ -565,33 +653,77 @@ export const appwriteService = {
     return false;
   },
 
-  async sendConsultationMessage(userId: string, message: string, area: string, procedureId?: string, procedureName?: string, title?: string): Promise<boolean> {
+  async sendConsultationMessage(userId: string, message: string, area: string, procedureId?: string, procedureName?: string, title?: string, processSection?: string, referenceImage?: string, priority: string = 'normal'): Promise<boolean> {
       if (isLegacyReady() && supabase) {
           const { error } = await supabase.from('consultation_messages').insert({
-              user_id: userId, title: title, message: message, procedure_id: procedureId, procedure_name: procedureName, area: area.toUpperCase(), status: 'pending'
+              user_id: userId, 
+              title: title, 
+              message: message, 
+              procedure_id: procedureId, 
+              procedure_name: procedureName, 
+              area: area.toUpperCase(), 
+              status: 'pending',
+              priority: priority,
+              process_section: processSection,
+              reference_image: referenceImage
           });
           return !error;
       }
       return false;
   },
 
-  async replyToMessage(messageId: string, userId: string, message: string): Promise<boolean> {
+  async replyToMessage(messageId: string, userId: string, message: string, replyImage?: string): Promise<boolean> {
     if (isLegacyReady() && supabase) {
-        const { error } = await supabase.from('consultation_replies').insert({ message_id: messageId, user_id: userId, message: message });
+        const { error } = await supabase.from('consultation_replies').insert({ 
+            message_id: messageId, 
+            user_id: userId, 
+            message: message,
+            reply_image: replyImage 
+        });
         return !error;
     }
     return false;
   },
 
-  async getCollaborativeMessages(allowedAreas: string[]): Promise<ConsultationMessage[]> {
+  async getResolvedConsultationsByProcedure(procedureId: string): Promise<ConsultationMessage[]> {
       if (isLegacyReady() && supabase) {
-          const { data, error } = await supabase.from('consultation_messages').select(`*, users (name, email, area, role, avatar_url), consultation_replies (id, message, created_at, user_id, users (name, email, role, avatar_url))`).order('created_at', { ascending: false });
+          const { data, error } = await supabase
+            .from('consultation_messages')
+            .select(`*, users (name, email, area, role, avatar_url), consultation_replies (id, message, created_at, user_id, reply_image, users (name, email, role, avatar_url))`)
+            .eq('procedure_id', procedureId)
+            .in('status', ['reviewed', 'closed'])
+            .order('created_at', { ascending: false });
+          
           if (error) return [];
+          
           return data.map((msg: any) => ({
-              id: msg.id, user_id: msg.user_id, title: msg.title, procedure_id: msg.procedure_id, procedure_name: msg.procedure_name, message: msg.message, status: msg.status, created_at: msg.created_at, area: (msg.area || '').toUpperCase(),
+              id: msg.id, user_id: msg.user_id, title: msg.title, procedure_id: msg.procedure_id, procedure_name: msg.procedure_name, process_section: msg.process_section, reference_image: msg.reference_image, message: msg.message, status: msg.status, priority: msg.priority, created_at: msg.created_at, area: (msg.area || '').toUpperCase(),
               user_name: msg.users?.name || msg.users?.email || 'Usuario', user_email: msg.users?.email || '', user_area: (msg.users?.area || '').toUpperCase(), user_role: msg.users?.role || 'viewer', user_avatar: msg.users?.avatar_url, 
               replies: (msg.consultation_replies || []).map((r: any) => ({
-                  id: r.id, message_id: msg.id, user_id: r.user_id, message: r.message, created_at: r.created_at, user_name: r.users?.name || r.users?.email || 'Usuario', user_role: r.users?.role, user_avatar: r.users?.avatar_url
+                  id: r.id, message_id: msg.id, user_id: r.user_id, message: r.message, reply_image: r.reply_image, created_at: r.created_at, user_name: r.users?.name || r.users?.email || 'Usuario', user_role: r.users?.role, user_avatar: r.users?.avatar_url
+              })).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+          }));
+      }
+      return [];
+  },
+
+  async getCollaborativeMessages(allowedAreas: string[]): Promise<ConsultationMessage[]> {
+      if (isLegacyReady() && supabase) {
+          const normalizedAllowed = allowedAreas.map(a => normalizeString(a));
+          const { data, error } = await supabase.from('consultation_messages').select(`*, users (name, email, area, role, avatar_url), consultation_replies (id, message, created_at, user_id, reply_image, users (name, email, role, avatar_url))`).order('created_at', { ascending: false });
+          if (error) return [];
+          
+          const filtered = data.filter((msg: any) => {
+              const isAdmin = ADMIN_EMAILS.includes((msg.users?.email || '').toLowerCase());
+              if (isAdmin) return true;
+              return normalizedAllowed.includes(normalizeString(msg.area || ''));
+          });
+
+          return filtered.map((msg: any) => ({
+              id: msg.id, user_id: msg.user_id, title: msg.title, procedure_id: msg.procedure_id, procedure_name: msg.procedure_name, process_section: msg.process_section, reference_image: msg.reference_image, message: msg.message, status: msg.status, priority: msg.priority, created_at: msg.created_at, area: (msg.area || '').toUpperCase(),
+              user_name: msg.users?.name || msg.users?.email || 'Usuario', user_email: msg.users?.email || '', user_area: (msg.users?.area || '').toUpperCase(), user_role: msg.users?.role || 'viewer', user_avatar: msg.users?.avatar_url, 
+              replies: (msg.consultation_replies || []).map((r: any) => ({
+                  id: r.id, message_id: msg.id, user_id: r.user_id, message: r.message, reply_image: r.reply_image, created_at: r.created_at, user_name: r.users?.name || r.users?.email || 'Usuario', user_role: r.users?.role, user_avatar: r.users?.avatar_url
               })).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
           }));
       }
@@ -599,7 +731,18 @@ export const appwriteService = {
   },
 
   async adminGetConsultationMessages(): Promise<ConsultationMessage[]> {
-      return this.getCollaborativeMessages([]);
+      if (isLegacyReady() && supabase) {
+          const { data, error } = await supabase.from('consultation_messages').select(`*, users (name, email, area, role, avatar_url), consultation_replies (id, message, created_at, user_id, reply_image, users (name, email, role, avatar_url))`).order('created_at', { ascending: false });
+          if (error) return [];
+          return data.map((msg: any) => ({
+              id: msg.id, user_id: msg.user_id, title: msg.title, procedure_id: msg.procedure_id, procedure_name: msg.procedure_name, process_section: msg.process_section, reference_image: msg.reference_image, message: msg.message, status: msg.status, priority: msg.priority, created_at: msg.created_at, area: (msg.area || '').toUpperCase(),
+              user_name: msg.users?.name || msg.users?.email || 'Usuario', user_email: msg.users?.email || '', user_area: (msg.users?.area || '').toUpperCase(), user_role: msg.users?.role || 'viewer', user_avatar: msg.users?.avatar_url, 
+              replies: (msg.consultation_replies || []).map((r: any) => ({
+                  id: r.id, message_id: msg.id, user_id: r.user_id, message: r.message, reply_image: r.reply_image, created_at: r.created_at, user_name: r.users?.name || r.users?.email || 'Usuario', user_role: r.users?.role, user_avatar: r.users?.avatar_url
+              })).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+          }));
+      }
+      return [];
   },
 
   async adminUpdateMessageStatus(id: string, status: 'reviewed' | 'archived' | 'closed'): Promise<boolean> {
@@ -612,7 +755,7 @@ export const appwriteService = {
 
   async adminDeleteMessage(id: string): Promise<boolean> {
       if (isLegacyReady() && supabase) {
-          const { error } = await supabase.from('consultation_messages').delete().eq('id', id);
+          const { error = null } = await supabase.from('consultation_messages').delete().eq('id', id);
           return !error;
       }
       return false;
@@ -655,7 +798,7 @@ export const appwriteService = {
 
   async adminRespondToDownloadRequest(id: string, status: 'approved' | 'rejected'): Promise<boolean> {
     if (isLegacyReady() && supabase) {
-      const { error } = await supabase.from('download_requests').update({ status, responded_at: new Date().toISOString() }).eq('id', id);
+      const { error = null } = await supabase.from('download_requests').update({ status, responded_at: new Date().toISOString() }).eq('id', id);
       return !error;
     }
     return false;
@@ -663,7 +806,7 @@ export const appwriteService = {
 
   async adminDeleteDownloadRequest(id: string): Promise<boolean> {
     if (isLegacyReady() && supabase) {
-        const { error } = await supabase.from('download_requests').delete().eq('id', id);
+        const { error = null } = await supabase.from('download_requests').delete().eq('id', id);
         return !error;
     }
     return false;
@@ -672,35 +815,32 @@ export const appwriteService = {
   async adminGetAllUsers(): Promise<User[]> {
     if (isLegacyReady() && supabase) {
       try {
-          const { data: u } = await supabase.from('users').select('*').order('created_at', { ascending: false });
-          const { data: s } = await supabase.from('privacy_signatures').select('*');
-          const { data: d } = await supabase.from('user_authorized_ips').select('user_id, ip_address');
-          
+          const [usersRes, signaturesRes, devicesRes, accessRes] = await Promise.all([
+              supabase.from('users').select('*').order('created_at', { ascending: false }),
+              supabase.from('privacy_signatures').select('*'),
+              supabase.from('user_authorized_ips').select('user_id, ip_address'),
+              supabase.from('user_area_access').select('user_id, area_name')
+          ]);
           const sm = new Map();
-          s?.forEach((sig: any) => sm.set(sig.user_id, sig));
-          
+          signaturesRes.data?.forEach((sig: any) => sm.set(sig.user_id, sig));
           const dm = new Map();
-          d?.forEach((dev: any) => {
+          devicesRes.data?.forEach((dev: any) => {
               if(!dm.has(dev.user_id)) dm.set(dev.user_id, []);
               dm.get(dev.user_id).push(dev.ip_address);
           });
-
-          return (u || []).map((u: any) => ({
-              $id: u.id, 
-              name: u.name, 
-              email: u.email, 
-              area: (u.area || '').toUpperCase(), 
-              allowedAreas: [(u.area || '').toUpperCase()], 
-              role: u.role, 
-              privacyAccepted: sm.has(u.id), 
-              signedName: sm.get(u.id)?.signed_name, 
-              signedDepartment: sm.get(u.id)?.signed_department, 
-              lastIp: u.last_ip || 'N/A', 
-              lastDeviceId: u.last_device_id || 'N/A', 
-              authorizedDevices: dm.get(u.id) || [u.last_device_id].filter(Boolean) || [],
-              avatarUrl: u.avatar_url, 
-              maxDevices: u.max_devices || 3
-          }));
+          const am = new Map<string, string[]>();
+          accessRes.data?.forEach((acc: any) => {
+              if(!am.has(acc.user_id)) am.set(acc.user_id, []);
+              am.get(acc.user_id)!.push((acc.area_name || '').toUpperCase());
+          });
+          return (usersRes.data || []).map((u: any) => {
+              const primaryArea = (u.area || '').toUpperCase();
+              let allowedAreas = am.get(u.id) || [primaryArea];
+              if (allowedAreas.length === 0 && primaryArea) allowedAreas = [primaryArea];
+              return {
+                  $id: u.id, name: u.name, email: u.email, area: primaryArea, allowedAreas: Array.from(new Set(allowedAreas)), role: u.role, privacyAccepted: sm.has(u.id), signedName: sm.get(u.id)?.signed_name, signedDepartment: sm.get(u.id)?.signed_department, lastIp: u.last_ip || 'N/A', lastDeviceId: u.last_device_id || 'N/A', authorizedDevices: dm.get(u.id) || [], avatarUrl: u.avatar_url, maxDevices: u.max_devices || 3
+              };
+          });
       } catch (e) { return []; }
     }
     return [];
@@ -708,14 +848,30 @@ export const appwriteService = {
 
   async adminDeleteAuthorizedDevice(userId: string, deviceId: string): Promise<boolean> {
       if (isLegacyReady() && supabase) {
-          const { error } = await supabase
-              .from('user_authorized_ips')
-              .delete()
-              .eq('user_id', userId)
-              .eq('ip_address', deviceId);
+          const { error } = await supabase.from('user_authorized_ips').delete().eq('user_id', userId).eq('ip_address', deviceId);
           return !error;
       }
       return false;
+  },
+
+  async adminUpdateUserAreas(userId: string, areas: string[]): Promise<boolean> {
+    if (isLegacyReady() && supabase) {
+        try {
+            const { error: delError } = await supabase.from('user_area_access').delete().eq('user_id', userId);
+            if (delError) throw delError;
+            
+            if (areas.length > 0) {
+                const inserts = areas.map(area => ({ user_id: userId, area_name: area.toUpperCase() }));
+                const { error: insError } = await supabase.from('user_area_access').insert(inserts);
+                if (insError) throw insError;
+            }
+            return true;
+        } catch (e) {
+            console.error("Error updating user areas", e);
+            return false;
+        }
+    }
+    return false;
   },
 
   async logProcedureAccess(userId: string, procedureId: string, procedureName: string, area: string): Promise<string | null> {
@@ -754,7 +910,7 @@ export const appwriteService = {
             data?.forEach((u: any) => um[u.id] = u);
         }
         return logs.map((log: any) => ({
-          id: log.id, user_id: log.user_id, procedure_id: log.procedure_id, procedure_name: log.procedure_name, area: log.area, accessed_at: log.accessed_at, duration_seconds: log.duration_seconds || 0, user_name: um[log.user_id]?.name || 'N/A', user_email: um[log.user_id]?.email || 'N/A'
+          id: log.id, user_id: log.user_id, procedure_id: log.procedure_id, procedure_name: log.procedure_name, area: log.area, accessed_at: log.accessed_at, duration_seconds: log.duration_seconds || 0, user_name: um[log.user_id]?.name || 'N/A', user_email: um[log.user_email] || 'N/A'
         }));
       } catch (e) { return []; }
     }
@@ -796,7 +952,7 @@ export const appwriteService = {
 
   async adminUpdateProposalStatus(id: string, status: string, feedback: string): Promise<boolean> {
       if (isLegacyReady() && supabase) {
-          const { error } = await supabase.from('improvement_proposals').update({ status, admin_feedback: feedback }).eq('id', id);
+          const { error = null } = await supabase.from('improvement_proposals').update({ status, admin_feedback: feedback }).eq('id', id);
           return !error;
       }
       return false;
@@ -804,7 +960,7 @@ export const appwriteService = {
 
   async adminDeleteProposal(id: string): Promise<boolean> {
     if (isLegacyReady() && supabase) {
-        const { error } = await supabase.from('improvement_proposals').delete().eq('id', id);
+        const { error = null } = await supabase.from('improvement_proposals').delete().eq('id', id);
         return !error;
     }
     return false;

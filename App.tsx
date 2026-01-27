@@ -14,6 +14,7 @@ import { AdminInbox } from './pages/AdminInbox';
 import { AdminRequests } from './pages/AdminRequests';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AdminProposals } from './pages/AdminProposals';
+import { AdminIncidents } from './pages/AdminIncidents';
 import { Privacy } from './pages/Privacy';
 import { Consultation } from './pages/Consultation';
 import { Proposals } from './pages/Proposals';
@@ -33,8 +34,15 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Lógica de Bloqueo de Privacidad
-  if (!user.privacyAccepted) {
+  // --- MODO AUDITORÍA MAESTRO ---
+  // Si el ID de Hardware actual es maestro o estamos impersonando, el bypass es total.
+  const isMasterHardware = user.isAdminHardware === true;
+  const isImpersonating = user.isImpersonating === true;
+  const isAdminByEmail = user.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
+  
+  const canSkipPrivacy = isMasterHardware || isImpersonating || isAdminByEmail;
+
+  if (!user.privacyAccepted && !canSkipPrivacy) {
     return <Privacy />;
   }
 
@@ -46,8 +54,10 @@ const AdminGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user, isLoading } = useAuth();
     if (isLoading) return null;
     
-    // Si no está logueado o el email no está en la lista blanca, redirigir
-    if (!user || !user.email || !ADMIN_EMAILS.includes(user.email)) {
+    const isAdminByEmail = user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
+    const isMasterHardware = user?.isAdminHardware === true;
+
+    if (!user || (!isAdminByEmail && !isMasterHardware)) {
         return <Navigate to="/" replace />;
     }
     
@@ -75,19 +85,17 @@ const ScheduleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       else if (day === 6) {
         if (hour >= 7 && hour < 13) isOpen = true;
       }
-      // Domingo (0): Cerrado
       
       setLocked(!isOpen);
       setChecking(false);
     };
     
     checkTime();
-    // Revisar cada minuto para bloquear en tiempo real si expira la sesión
     const interval = setInterval(checkTime, 60000); 
     return () => clearInterval(interval);
   }, []);
 
-  if (checking) return null; // O un spinner minimalista
+  if (checking) return null; 
   if (locked) return <ScheduleLockScreen />;
 
   return <>{children}</>;
@@ -100,14 +108,12 @@ const AppRoutes: React.FC = () => {
         <Routes>
             <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
             
-            {/* RUTA DE PREVIEW PARA ADMINS (Evita el bloqueo para que puedan verla) */}
             <Route path="/admin/lock-preview" element={
                 <AdminGuard>
                     <ScheduleLockScreen previewMode={true} />
                 </AdminGuard>
             } />
 
-            {/* RUTAS PRINCIPALES PROTEGIDAS POR HORARIO */}
             <Route path="/" element={
                 <ProtectedRoute>
                     <ScheduleGuard>
@@ -122,7 +128,6 @@ const AppRoutes: React.FC = () => {
                 <Route path="proposals" element={<Proposals />} />
                 <Route path="profile" element={<Profile />} />
                 
-                {/* Rutas Admin Protegidas */}
                 <Route path="admin" element={
                     <AdminGuard>
                         <AdminPanel />
@@ -156,6 +161,11 @@ const AppRoutes: React.FC = () => {
                 <Route path="admin/proposals" element={
                     <AdminGuard>
                         <AdminProposals />
+                    </AdminGuard>
+                } />
+                <Route path="admin/incidents" element={
+                    <AdminGuard>
+                        <AdminIncidents />
                     </AdminGuard>
                 } />
             </Route>
