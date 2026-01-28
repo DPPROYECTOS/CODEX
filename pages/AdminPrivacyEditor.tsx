@@ -226,7 +226,7 @@ La Constancia de Aceptación tiene carácter permanente y prueba que el Usuario 
         </div>
         
         <div className="bg-gray-50 p-2 border-t border-gray-200 text-xs text-gray-400 text-center uppercase tracking-wider font-semibold">
-             Editor WYSIWYG - CODEX System v1.5
+             Editor WYSIWYG - CODEX System v1.6
         </div>
       </div>
     </div>

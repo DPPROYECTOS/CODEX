@@ -160,7 +160,7 @@ export const Login: React.FC = () => {
       </div>
 
       <div className="absolute bottom-6 right-6 opacity-20 pointer-events-none select-none">
-          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Build v1.5</span>
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Build v1.6</span>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 
-# CODEX (UAD Consultation Platform) - Documentación Maestra v1.5
+# CODEX (UAD Consultation Platform) - Documentación Maestra v1.6
 
-Este documento es la **Fuente de Verdad** técnica y operativa del proyecto **CODEX**. Describe la arquitectura, lógica de seguridad, esquemas de datos y flujos críticos tras la transición de "Nexus" a la versión estable **v1.5**.
+Este documento es la **Fuente de Verdad** técnica y operativa del proyecto **CODEX**. Describe la arquitectura, lógica de seguridad, esquemas de datos y flujos críticos tras la transición de "Nexus" a la versión estable **v1.6**.
 
 ---
 
@@ -9,7 +9,7 @@ Este documento es la **Fuente de Verdad** técnica y operativa del proyecto **CO
 **CODEX** es la plataforma corporativa de Inteligencia Operacional y Gestión del Conocimiento de **SUAVE Y FÁCIL S.A. DE C.V.** 
 Su función primaria es servir como repositorio centralizado de procedimientos operativos, garantizando que solo el personal autorizado acceda a la información bajo estrictos protocolos de seguridad y cumplimiento legal.
 
-### Pilares del Sistema v1.5:
+### Pilares del Sistema v1.6:
 1.  **Seguridad Forense:** Monitoreo activo de comportamientos de riesgo (capturas, pérdida de foco, copiado).
 2.  **Validación de Hardware (HWID):** Registro y limitación de dispositivos físicos por cuenta de usuario.
 3.  **Cumplimiento Normativo (ACUR):** Firma digital obligatoria vinculada a la identidad legal del colaborador.
@@ -102,4 +102,4 @@ CODEX restringe el acceso imperativamente vía `ScheduleGuard`:
 - **Fuera de horario:** Pantalla de bloqueo total de sistema, impidiendo cualquier consulta extemporánea.
 
 ---
-**CODEX System v1.5** - *Security through Transparency.*
+**CODEX System v1.6** - *Security through Transparency.*

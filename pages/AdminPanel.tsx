@@ -136,7 +136,7 @@ export const AdminPanel: React.FC = () => {
             <span className="block px-4 py-1 rounded-full bg-red-900/50 border border-red-500/50 text-red-200 text-xs font-mono uppercase tracking-widest mb-2 shadow-sm">
                 Root Access
             </span>
-            <p className="text-xs text-indigo-400 font-mono">v1.5 System</p>
+            <p className="text-xs text-indigo-400 font-mono">v1.6 System</p>
         </div>
       </div>
 

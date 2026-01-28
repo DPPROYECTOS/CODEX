@@ -259,7 +259,7 @@ export const Dashboard: React.FC = () => {
 
       {/* MARCA DE AGUA TÉCNICA DE VERSIÓN */}
       <div className="flex justify-end pt-4 pb-2 opacity-20 pointer-events-none select-none">
-          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">System Build v1.5</span>
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">System Build v1.6</span>
       </div>
     </div>
   );
