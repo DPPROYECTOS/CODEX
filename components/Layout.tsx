@@ -18,7 +18,9 @@ import {
   Lightbulb,
   User as UserIcon,
   XCircle,
-  ShieldAlert
+  ShieldAlert,
+  Share2,
+  Terminal
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ADMIN_EMAILS } from '../types';
@@ -42,19 +44,20 @@ export const Layout: React.FC = () => {
     navigate('/admin');
   };
 
-  // Normalizar correos para comparación robusta
   const isAdmin = user.email && ADMIN_EMAILS.some(email => email.toLowerCase() === user.email.toLowerCase());
   const isMultiArea = user.allowedAreas.length > 1;
 
   const links = [
     { to: '/', icon: LayoutDashboard, label: 'Inicio' },
     { to: '/catalog', icon: BookOpen, label: 'Procedimientos' },
+    { to: '/contributions', icon: Share2, label: 'Aportaciones' },
     { to: '/consultation', icon: Search, label: 'Consulta y Observaciones' },
     { to: '/proposals', icon: Lightbulb, label: 'Propuestas de Mejora' },
   ];
 
   if (isAdmin) {
     links.push({ to: '/admin', icon: Shield, label: 'Administrador' });
+    links.push({ to: '/admin/telemetry', icon: Terminal, label: 'Telemetría de Terminales' });
     links.push({ to: '/admin/incidents', icon: ShieldAlert, label: 'Alertas de Seguridad' });
     links.push({ to: '/admin/analytics', icon: TrendingUp, label: 'Analíticas' });
     links.push({ to: '/admin/requests', icon: FileCheck, label: 'Solicitudes' });
@@ -185,10 +188,12 @@ export const Layout: React.FC = () => {
              <h2 className="text-2xl font-bold text-white">
                {location.pathname === '/' ? 'Panel Principal' : 
                 location.pathname === '/catalog' ? 'Catálogo de Procedimientos' :
+                location.pathname === '/contributions' ? 'Repositorio Comunitario' :
                 location.pathname === '/consultation' ? 'Consulta y Observaciones' :
                 location.pathname === '/proposals' ? 'Propuestas de Mejora' :
                 location.pathname === '/profile' ? 'Mi Perfil' :
                 location.pathname === '/admin' ? 'Administración' : 
+                location.pathname === '/admin/telemetry' ? 'Telemetría de Terminales' :
                 location.pathname === '/admin/incidents' ? 'Centro de Control de Seguridad' :
                 location.pathname === '/admin/analytics' ? 'Analíticas de Uso' :
                 location.pathname === '/admin/requests' ? 'Solicitudes de Archivos' : 

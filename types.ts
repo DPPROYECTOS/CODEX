@@ -29,6 +29,21 @@ export interface Folder {
   area?: string; 
 }
 
+export interface DeviceSpecs {
+  cpuCores: number;
+  ramGB: number | string;
+  gpu: string;
+  resolution: string;
+  os: string;
+  browser: string;
+  batteryLevel?: number;
+  isCharging?: boolean;
+  connectionType?: string;
+  downlinkMbps?: number;
+  platform: string;
+  language: string;
+}
+
 export interface User {
   $id: string;
   name: string;
@@ -42,10 +57,25 @@ export interface User {
   signedDepartment?: string; 
   lastIp?: string;           
   lastDeviceId?: string;     
-  authorizedDevices?: string[]; // Array para guardar todos los IDs vinculados
+  authorizedDevices?: string[]; 
   maxDevices?: number;       
   isImpersonating?: boolean; 
-  isAdminHardware?: boolean; // Identifica si la terminal física es de un admin
+  isAdminHardware?: boolean; 
+  deviceSpecs?: DeviceSpecs;
+}
+
+export interface CommunityContribution {
+  id: string;
+  user_id: string;
+  user_name: string;
+  title: string;
+  description: string;
+  file_url: string;
+  file_type: 'pdf' | 'excel' | 'word' | 'image';
+  area: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  device_id?: string;
 }
 
 export interface SecurityIncident {
@@ -71,6 +101,7 @@ export interface OnlineUser {
   role: string;
   onlineAt: string; 
   ip: string; 
+  deviceSpecs?: DeviceSpecs;
 }
 
 export interface Department {
@@ -116,7 +147,7 @@ export interface ConsultationReply {
   message_id: string;
   user_id: string;
   message: string;
-  reply_image?: string; // Captura en respuesta
+  reply_image?: string; 
   created_at: string;
   user_name?: string;
   user_role?: string; 
@@ -129,8 +160,8 @@ export interface ConsultationMessage {
   title?: string; 
   procedure_id?: string;
   procedure_name?: string;
-  process_section?: string; // Sección o paso específico del proceso
-  reference_image?: string; // Captura de pantalla en Base64
+  process_section?: string; 
+  reference_image?: string; 
   message: string;
   status: 'pending' | 'reviewed' | 'archived' | 'closed';
   priority?: 'low' | 'normal' | 'high' | 'urgent';
@@ -185,13 +216,11 @@ export interface ImprovementProposal {
   user_avatar?: string;
 }
 
-// Usuarios que tienen control total del sistema (Panel Admin + Todas las Áreas)
 export const ADMIN_EMAILS = [
   'zerklucio@gmail.com',
   'darienperez695@gmail.com'
 ];
 
-// Usuarios que NO son admins, pero pueden ver TODAS las áreas y carpetas
 export const MASTER_VIEWER_EMAILS = [
   'julio_romo@cvdirecto.mx'
 ];

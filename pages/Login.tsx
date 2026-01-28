@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, AlertCircle, MonitorX } from 'lucide-react';
+import { Lock, Mail, AlertCircle, MonitorX, Cpu, ShieldCheck } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { appwriteService } from '../services/appwriteService';
 
 export const Login: React.FC = () => {
   const { login } = useAuth();
@@ -12,16 +13,23 @@ export const Login: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOperaGX, setIsOperaGX] = useState(false);
   const [recentEmails, setRecentEmails] = useState<string[]>([]);
+  const [deviceId, setDeviceId] = useState('');
 
   useEffect(() => {
+    // Detectar Opera GX
     const ua = navigator.userAgent;
     if (ua.includes('OPR') && ua.includes('GX')) {
         setIsOperaGX(true);
     }
+    
+    // Recuperar historial de correos (Preservar función solicitada)
     try {
         const saved = JSON.parse(localStorage.getItem('codex_recent_emails') || '[]');
         setRecentEmails(saved);
     } catch (e) {}
+
+    // Obtener ID de hardware determinista para mostrar en UI
+    setDeviceId(appwriteService.getDeviceId());
   }, []);
 
   const saveEmailToHistory = (emailToSave: string) => {
@@ -58,7 +66,6 @@ export const Login: React.FC = () => {
       <div className="max-w-md w-full bg-slate-900 rounded-xl shadow-2xl p-8 border border-white/10 relative z-10">
         
         <div className="flex justify-center mb-8">
-            {/* Logo aumentado de tamaño: w-80 en móviles y w-96 en escritorio */}
             <Logo className="w-80 md:w-96 h-auto text-white" />
         </div>
 
@@ -71,6 +78,17 @@ export const Login: React.FC = () => {
               <p>Si la conexión falla, intenta desactivar el <strong>VPN</strong> y el <strong>Bloqueo de Rastreadores</strong>.</p>
            </div>
         )}
+
+        <div className="mb-6 flex items-center justify-between bg-black/40 px-4 py-2 rounded-lg border border-white/5">
+            <div className="flex items-center text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                <Cpu size={12} className="mr-2 text-indigo-500" />
+                Terminal ID
+            </div>
+            <div className="flex items-center text-[10px] font-mono text-indigo-400">
+                {deviceId}
+                <ShieldCheck size={12} className="ml-2 text-emerald-500" />
+            </div>
+        </div>
 
         {error && (
           <div className="mb-6 bg-red-900/20 border-l-4 border-red-500 p-4 rounded shadow-sm">
@@ -141,7 +159,6 @@ export const Login: React.FC = () => {
         </form>
       </div>
 
-      {/* MARCA DE AGUA DE VERSIÓN */}
       <div className="absolute bottom-6 right-6 opacity-20 pointer-events-none select-none">
           <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Build v1.5</span>
       </div>

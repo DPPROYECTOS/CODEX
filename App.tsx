@@ -7,6 +7,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Catalog } from './pages/Catalog';
 import { ProcedureDetail } from './pages/ProcedureDetail';
+import { CommunityContributions } from './pages/CommunityContributions';
 import { AdminPanel } from './pages/AdminPanel';
 import { AdminPrivacyEditor } from './pages/AdminPrivacyEditor';
 import { AdminCertificateEditor } from './pages/AdminCertificateEditor';
@@ -15,6 +16,7 @@ import { AdminRequests } from './pages/AdminRequests';
 import { AdminAnalytics } from './pages/AdminAnalytics';
 import { AdminProposals } from './pages/AdminProposals';
 import { AdminIncidents } from './pages/AdminIncidents';
+import { AdminTelemetry } from './pages/AdminTelemetry';
 import { Privacy } from './pages/Privacy';
 import { Consultation } from './pages/Consultation';
 import { Proposals } from './pages/Proposals';
@@ -34,8 +36,6 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // --- MODO AUDITORÍA MAESTRO ---
-  // Si el ID de Hardware actual es maestro o estamos impersonando, el bypass es total.
   const isMasterHardware = user.isAdminHardware === true;
   const isImpersonating = user.isImpersonating === true;
   const isAdminByEmail = user.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
@@ -49,12 +49,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-// Guardia específico para la ruta de Admin
 const AdminGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user, isLoading } = useAuth();
     if (isLoading) return null;
     
-    const isAdminByEmail = user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
+    const isAdminByEmail = user?.email && ADMIN_EMAILS.some(e => e.toLowerCase() === user?.email.toLowerCase());
     const isMasterHardware = user?.isAdminHardware === true;
 
     if (!user || (!isAdminByEmail && !isMasterHardware)) {
@@ -64,7 +63,6 @@ const AdminGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return <>{children}</>;
 };
 
-// Guardia de Horario (Imperativo)
 const ScheduleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [locked, setLocked] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -72,16 +70,14 @@ const ScheduleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   useEffect(() => {
     const checkTime = () => {
       const now = new Date();
-      const day = now.getDay(); // 0=Domingo, 1=Lunes, ..., 6=Sábado
+      const day = now.getDay(); 
       const hour = now.getHours();
       
       let isOpen = false;
       
-      // Lunes (1) a Viernes (5): 07:00 a 18:00 (17:59)
       if (day >= 1 && day <= 5) {
         if (hour >= 7 && hour < 18) isOpen = true;
       }
-      // Sábado (6): 07:00 a 13:00 (12:59)
       else if (day === 6) {
         if (hour >= 7 && hour < 13) isOpen = true;
       }
@@ -123,6 +119,7 @@ const AppRoutes: React.FC = () => {
             }>
                 <Route index element={<Dashboard />} />
                 <Route path="catalog" element={<Catalog />} />
+                <Route path="contributions" element={<CommunityContributions />} />
                 <Route path="consultation" element={<Consultation />} />
                 <Route path="procedure/:id" element={<ProcedureDetail />} />
                 <Route path="proposals" element={<Proposals />} />
@@ -131,6 +128,11 @@ const AppRoutes: React.FC = () => {
                 <Route path="admin" element={
                     <AdminGuard>
                         <AdminPanel />
+                    </AdminGuard>
+                } />
+                <Route path="admin/telemetry" element={
+                    <AdminGuard>
+                        <AdminTelemetry />
                     </AdminGuard>
                 } />
                 <Route path="admin/privacy-editor" element={

@@ -1,9 +1,9 @@
 
-import { Area, Procedure, User, Status, ADMIN_EMAILS, MASTER_VIEWER_EMAILS, ADMIN_HARDWARE_IDS, Department, OnlineUser, ConsultationMessage, ConsultationReply, Folder, DownloadRequest, AccessLog, ImprovementProposal, SecurityIncident } from '../types';
+import { Area, Procedure, User, Status, ADMIN_EMAILS, MASTER_VIEWER_EMAILS, ADMIN_HARDWARE_IDS, Department, OnlineUser, ConsultationMessage, ConsultationReply, Folder, DownloadRequest, AccessLog, ImprovementProposal, SecurityIncident, CommunityContribution, DeviceSpecs } from '../types';
 import { MOCK_USERS, MOCK_PROCEDURES } from './mockData';
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
-// --- CONFIGURACIÓN DE SUPABASE (DUAL CLIENT ARCHITECTURE) ---
+// --- CONFIGURACIÓN DE SUPABASE ---
 
 const CONFIG_LEGACY = {
   SUPABASE_URL: 'https://etjhwybavjcygkllbaye.supabase.co',
@@ -41,25 +41,129 @@ const STORAGE_KEY_USER = 'codex_mock_user';
 const STORAGE_KEY_DEVICE_ID = 'codex_device_unique_token';
 const STORAGE_KEY_MASTER_SEAL = 'codex_terminal_master_seal'; 
 
+// --- FUNCIONES AUXILIARES DE PERSISTENCIA Y SEGURIDAD ---
+
+const setCookie = (name: string, value: string, days: number) => {
+    const expires = new Date();
+    expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
+    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Strict`;
+};
+
+const getCookie = (name: string) => {
+    const nameEQ = name + "=";
+    const ca = document.cookie.split(';');
+    for(let i=0;i < ca.length;i++) {
+        let c = ca[i];
+        while (c.charAt(0) === ' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+};
+
+// Genera un hash simple para convertir strings largos en IDs cortos
+const cyrb53 = (str: string, seed = 0) => {
+    let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0, ch; i < str.length; i++) {
+        ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+};
+
 export const normalizeString = (str: string) => {
     return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : "";
 };
 
 export const appwriteService = {
   
+  // --- MOTOR DE TELEMETRÍA DE HARDWARE ---
+  async getDeviceSpecs(): Promise<DeviceSpecs> {
+    const cpuCores = navigator.hardwareConcurrency || 0;
+    const ramGB = (navigator as any).deviceMemory || 'N/A';
+    const resolution = `${window.screen.width}x${window.screen.height} (${window.screen.colorDepth}bit)`;
+    
+    // Obtener GPU real vía WebGL
+    let gpu = 'Desconocida';
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (gl) {
+            const debugInfo = (gl as any).getExtension('WEBGL_debug_renderer_info');
+            if (debugInfo) {
+                gpu = (gl as any).getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+            }
+        }
+    } catch (e) {}
+
+    // Batería (Async API)
+    let batteryLevel: number | undefined;
+    let isCharging: boolean | undefined;
+    try {
+        if ('getBattery' in navigator) {
+            const battery = await (navigator as any).getBattery();
+            batteryLevel = Math.round(battery.level * 100);
+            isCharging = battery.charging;
+        }
+    } catch (e) {}
+
+    // Conexión
+    const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+    
+    return {
+        cpuCores,
+        ramGB,
+        gpu,
+        resolution,
+        os: navigator.platform,
+        browser: navigator.userAgent.split(' ').pop() || 'Desconocido',
+        batteryLevel,
+        isCharging,
+        connectionType: conn?.effectiveType || 'WiFi/Ethernet',
+        downlinkMbps: conn?.downlink || 0,
+        platform: navigator.platform,
+        language: navigator.language
+    };
+  },
+
+  // --- MOTOR DE IDENTIDAD DE HARDWARE DETERMINISTA ---
   getDeviceId(): string {
-    let deviceId = localStorage.getItem(STORAGE_KEY_DEVICE_ID);
+    let deviceId = localStorage.getItem(STORAGE_KEY_DEVICE_ID) || getCookie(STORAGE_KEY_DEVICE_ID);
+    
     if (!deviceId) {
-        // Generación de Huella Digital (Fingerprint) más estable
-        const screenSpecs = `${window.screen.width}x${window.screen.height}`;
+        const screenSpecs = `${window.screen.width}x${window.screen.height}x${window.screen.colorDepth}`;
         const cpuCores = navigator.hardwareConcurrency || 4;
         const platform = navigator.platform || 'unknown';
-        const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const language = navigator.language || 'es';
         
-        // Formato estable: HW-SPEC-CORES-RANDOM
-        deviceId = `HW-${screenSpecs}-${cpuCores}-${randomPart}`;
-        localStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
+        let canvasHash = '';
+        try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                canvas.width = 200;
+                canvas.height = 50;
+                ctx.textBaseline = "alphabetic";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(125,1,62,20);
+                ctx.fillStyle = "#069";
+                ctx.fillText("CODEX_SECURE_ID", 2, 15);
+                canvasHash = canvas.toDataURL().slice(-50);
+            }
+        } catch (e) {}
+
+        const machineFingerprint = `${screenSpecs}-${cpuCores}-${platform}-${language}-${canvasHash}`;
+        const shortHash = cyrb53(machineFingerprint).toUpperCase().substring(0, 12);
+        deviceId = `CDX-${shortHash}`;
     }
+
+    localStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
+    setCookie(STORAGE_KEY_DEVICE_ID, deviceId, 3650); 
+    
     return deviceId;
   },
 
@@ -118,7 +222,6 @@ export const appwriteService = {
         const isFullAdmin = isAdminByEmail || isAdminByRole;
         const hasGlobalVisibility = isFullAdmin || isMasterViewer;
 
-        // --- SISTEMA DE REGISTRO DE HARDWARE (AHORA INCLUYE ADMINS PARA TRAZABILIDAD) ---
         const { data: authorizedDevicesData } = await supabase.from('user_authorized_ips').select('ip_address').eq('user_id', authData.user.id);
         let authorizedIds = (authorizedDevicesData || []).map((i: any) => i.ip_address);
 
@@ -126,18 +229,17 @@ export const appwriteService = {
             const maxAllowed = profileData.max_devices || (isFullAdmin ? 10 : 3);
             if (authorizedIds.length >= maxAllowed) {
                 await supabase.auth.signOut();
-                throw new Error(`DISPOSITIVO NO AUTORIZADO: Límite de ${maxAllowed} equipos alcanzado.`);
+                throw new Error(`LIMITE DE DISPOSITIVOS: Ya tienes ${authorizedIds.length} de ${maxAllowed} equipos vinculados. Contacta a Soporte.`);
             } else {
                 await supabase.from('user_authorized_ips').insert({
                     user_id: authData.user.id,
                     ip_address: currentDeviceId,
-                    device_name: isFullAdmin ? `Terminal Admin ${authorizedIds.length + 1}` : `Terminal ${authorizedIds.length + 1}`
+                    device_name: isFullAdmin ? `Terminal Admin` : `Terminal Operativa`
                 });
                 authorizedIds.push(currentDeviceId);
             }
         }
 
-        // Actualizar metadatos de conexión
         let currentIp = '';
         try {
             const ipRes = await fetch('https://api.ipify.org?format=json');
@@ -255,7 +357,6 @@ export const appwriteService = {
     if (!isLegacyReady() || !supabase) return null;
     try {
         const deviceId = this.getDeviceId();
-        // CLAVE ÚNICA POR DISPOSITIVO: Esto evita que una sesión pise a otra en el monitor
         const presenceKey = `${user.$id}:${deviceId}`;
 
         const channel = supabase.channel('codex_global_presence', {
@@ -277,7 +378,8 @@ export const appwriteService = {
                                 area: p.area,
                                 role: p.role,
                                 onlineAt: p.onlineAt,
-                                ip: p.ip || 'No detectada'
+                                ip: p.ip || 'No detectada',
+                                deviceSpecs: p.deviceSpecs
                             });
                          }
                     });
@@ -287,7 +389,6 @@ export const appwriteService = {
 
         if (onForceLogout) {
             channel.on('broadcast', { event: 'force_logout' }, (payload: any) => {
-                // Si el broadcast es para este usuario específico o global
                 if (payload.payload?.userId === user.$id) {
                     onForceLogout(payload.payload.userId);
                 }
@@ -296,6 +397,7 @@ export const appwriteService = {
 
         channel.subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
+                const specs = await this.getDeviceSpecs();
                 await channel.track({
                     userId: user.$id,
                     name: user.name,
@@ -303,7 +405,8 @@ export const appwriteService = {
                     area: user.area,
                     role: user.role,
                     onlineAt: new Date().toISOString(),
-                    ip: deviceId // Usamos el ID de Hardware en lugar de la IP real en este campo para el monitor
+                    ip: deviceId,
+                    deviceSpecs: specs
                 });
             }
         });
@@ -964,5 +1067,75 @@ export const appwriteService = {
         return !error;
     }
     return false;
+  },
+
+  // --- SERVICIOS DE REPOSITORIO COMUNITARIO (APORTACIONES) ---
+
+  async uploadCommunityFile(file: File): Promise<string | null> {
+    if (!isLegacyReady() || !supabase) return null;
+    try {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `contribution_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+            .from('community-files')
+            .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage
+            .from('community-files')
+            .getPublicUrl(fileName);
+
+        return data.publicUrl;
+    } catch (e) {
+        console.error("Error uploading community file", e);
+        return null;
+    }
+  },
+
+  async createCommunityContribution(contribution: Partial<CommunityContribution>): Promise<boolean> {
+      if (!isLegacyReady() || !supabase) return false;
+      const { error } = await supabase.from('community_contributions').insert({
+          ...contribution,
+          status: 'pending',
+          device_id: this.getDeviceId()
+      });
+      return !error;
+  },
+
+  async getCommunityContributions(allowedAreas: string[], isAdmin: boolean = false): Promise<CommunityContribution[]> {
+    if (!isLegacyReady() || !supabase) return [];
+    try {
+        let query = supabase.from('community_contributions').select('*').order('created_at', { ascending: false });
+        
+        // --- SEGMENTACIÓN DE SEGURIDAD POR ÁREA ---
+        if (!isAdmin) {
+            const upperAllowed = allowedAreas.map(a => a.toUpperCase());
+            query = query.in('area', upperAllowed).eq('status', 'approved');
+        }
+
+        const { data, error } = await query;
+        if (error) return [];
+
+        return data as CommunityContribution[];
+    } catch (e) { return []; }
+  },
+
+  async adminGetPendingContributions(): Promise<CommunityContribution[]> {
+      if (!isLegacyReady() || !supabase) return [];
+      const { data } = await supabase.from('community_contributions').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+      return (data as CommunityContribution[]) || [];
+  },
+
+  async adminUpdateContributionStatus(id: string, status: 'approved' | 'rejected'): Promise<boolean> {
+      if (!isLegacyReady() || !supabase) return false;
+      const { error } = await supabase.from('community_contributions').update({ status }).eq('id', id);
+      return !error;
+  },
+
+  async adminDeleteContribution(id: string): Promise<boolean> {
+      if (!isLegacyReady() || !supabase) return false;
+      const { error } = await supabase.from('community_contributions').delete().eq('id', id);
+      return !error;
   }
 };
