@@ -149,7 +149,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({ fileUrl, fileN
         <div className="flex flex-wrap w-[200%] h-[200%] -rotate-45 -translate-x-1/4 -translate-y-1/4">
             {Array.from({ length: 100 }).map((_, i) => (
                 <div key={i} className="p-12 text-[10px] font-black text-white uppercase whitespace-nowrap tracking-widest">
-                    CONFIDENCIAL - {user?.name || 'USUARIO'} - {new Date().toLocaleDateString()}
+                    CONFIDENCIAL - SUAVE Y FACIL S.A. de C.V. - {new Date().toLocaleDateString()}
                 </div>
             ))}
         </div>
